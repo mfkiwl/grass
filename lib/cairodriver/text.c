@@ -8,7 +8,7 @@
   This program is free software under the GNU General Public License
   (>=v2). Read the file COPYING that comes with GRASS for details.
   
-  \author Lars Ahlzen <lars ahlzen.com> (original contibutor)
+  \author Lars Ahlzen <lars ahlzen.com> (original contributor)
   \author Glynn Clements  
 */
 
@@ -42,7 +42,7 @@ static char *convert(const char *in)
 	size_t ret;
 	iconv_t cd;
 
-	if ((cd = iconv_open("UTF-8", encoding)) < 0)
+	if ((cd = iconv_open("UTF-8", encoding)) == (iconv_t) -1)
 	    G_fatal_error(_("Unable to convert from <%s> to UTF-8"),
 			  encoding);
 
@@ -195,7 +195,7 @@ static void set_font_fc(const char *name)
 	face = NULL;
     }
 
-    pattern = FcNameParse(name);
+    pattern = FcNameParse((FcChar8 *)name);
     FcDefaultSubstitute(pattern);
     FcConfigSubstitute(FcConfigGetCurrent(), pattern, FcMatchPattern);
     pattern = FcFontMatch(FcConfigGetCurrent(), pattern, &result);
@@ -223,7 +223,7 @@ static void font_list_fc(char ***list, int *count, int verbose)
     for (i = 0; i < fontset->nfont; i++) {
 	char buf[1024];
 	FcPattern *pat = fontset->fonts[i];
-	FcChar8 *family = "", *style = "";
+	FcChar8 *family = (FcChar8 *)"", *style = (FcChar8 *)"";
 
 	FcPatternGetString(pat, FC_FAMILY, 0, &family);
 	FcPatternGetString(pat, FC_STYLE , 0, &style );
@@ -340,4 +340,3 @@ void Cairo_font_info(char ***list, int *count)
     font_list_fc(list, count, 1);
 #endif
 }
-

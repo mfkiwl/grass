@@ -46,7 +46,6 @@ from __future__ import print_function
 import os
 import sys
 import glob
-import copy
 import six
 
 import wx
@@ -63,7 +62,7 @@ from grass.exceptions import CalledModuleError
 
 from gui_core.widgets import ManageSettingsWidget, CoordinatesValidator
 
-from core.gcmd import RunCommand, GError, GMessage, GWarning, GException
+from core.gcmd import RunCommand, GMessage, GWarning, GException
 from core.utils    import GetListOfLocations, GetListOfMapsets, \
     GetFormats, rasterFormatExtension, vectorFormatExtension
 from core.utils import GetSettingsPath, GetValidLayerName, ListSortLower
@@ -607,7 +606,7 @@ class TreeCtrlComboPopup(ListCtrlComboPopup):
         :param exclude: True to exclude, False for forcing the list
         :param node: parent node
         """
-        elist = grass.natural_sort(elist)
+        elist = grass.naturally_sorted(elist)
         for elem in elist:
             if elem != '':
                 fullqElem = elem + '@' + mapset
@@ -2559,7 +2558,10 @@ class VectorCategorySelect(wx.Panel):
         if self._isMapSelected():
             layerList = self.giface.GetLayerList()
             layerSelected = layerList.GetSelectedLayer()
-            inputName = self.task.get_param('input')
+            # d.vect module
+            inputName = self.task.get_param(value='map', raiseError=False)
+            if not inputName:
+                inputName = self.task.get_param('input')
             if inputName['value'] != str(layerSelected):
                 if inputName['value'] == '' or inputName['value'] is None:
                     GWarning(_("Input vector map is not selected"))

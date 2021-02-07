@@ -18,13 +18,14 @@ import wx
 
 from core.gcmd import GException, GError, GMessage
 from grass.imaging import writeAvi, writeGif, writeIms, writeSwf
+from core.gthread import gThread
 from core.settings import UserSettings
 from gui_core.wrap import EmptyImage, ImageFromBitmap
 
 from animation.temporal_manager import TemporalManager
 from animation.dialogs import InputDialog, EditDialog, ExportDialog
 from animation.utils import TemporalMode, TemporalType, Orientation, RenderText, WxImageToPil, \
-    sampleCmdMatrixAndCreateNames, layerListToCmdsMatrix, HashCmds, getCpuCount
+    sampleCmdMatrixAndCreateNames, layerListToCmdsMatrix, HashCmds
 from animation.data import AnimationData
 
 
@@ -426,7 +427,7 @@ class AnimationController(wx.EvtHandler):
                 bitmap = self.bitmapProvider.LoadOverlay(
                     animationData.legendCmd)
                 try:
-                    from PIL import Image
+                    from PIL import Image  # noqa: F401
                     for param in animationData.legendCmd:
                         if param.startswith('at'):
                             b, t, l, r = param.split('=')[1].split(',')
@@ -619,10 +620,17 @@ class AnimationController(wx.EvtHandler):
 
         # export
         pilImages = [WxImageToPil(image) for image in images]
-        busy = wx.BusyInfo(_("Exporting animation, please wait..."),
-                           parent=self.frame)
+        self.busy = wx.BusyInfo(_("Exporting animation, please wait..."),
+                                parent=self.frame)
         wx.GetApp().Yield()
         try:
+            def export_avi_callback(event):
+                error = event.ret
+                del self.busy
+                if error:
+                    GError(parent=self.frame, message=error)
+                    return
+
             if exportInfo['method'] == 'sequence':
                 filename = os.path.join(
                     exportInfo['directory'],
@@ -637,12 +645,19 @@ class AnimationController(wx.EvtHandler):
                 writeSwf(filename=exportInfo['file'], images=pilImages,
                          duration=self.timeTick / float(1000), repeat=True)
             elif exportInfo['method'] == 'avi':
-                writeAvi(filename=exportInfo['file'], images=pilImages,
-                         duration=self.timeTick / float(1000),
-                         encoding=exportInfo['encoding'],
-                         inputOptions=exportInfo['options'])
+                thread = gThread()
+                thread.Run(callable=writeAvi,
+                           filename=exportInfo['file'],
+                           images=pilImages,
+                           duration=self.timeTick / float(1000),
+                           encoding=exportInfo['encoding'],
+                           inputOptions=exportInfo['options'],
+                           bg_task=True,
+                           ondone=export_avi_callback,
+                )
         except Exception as e:
-            del busy
+            del self.busy
             GError(parent=self.frame, message=str(e))
             return
-        del busy
+        if exportInfo['method'] in ('sequence', 'gif', 'swf'):
+            del self.busy

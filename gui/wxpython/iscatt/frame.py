@@ -21,7 +21,6 @@ This program is free software under the GNU General Public License
 from __future__ import print_function
 
 import os
-import sys
 import six
 
 import wx
@@ -29,9 +28,8 @@ import wx.lib.scrolledpanel as scrolled
 import wx.lib.mixins.listctrl as listmix
 
 from core import globalvar
-from core.gcmd import GException, GError, RunCommand
+from core.gcmd import GError
 
-from gui_core.gselect import Select
 from gui_core.dialogs import SetOpacityDialog
 from gui_core.wrap import StaticBox, Menu, ListCtrl
 from iscatt.controllers import ScattsManager
@@ -168,7 +166,7 @@ class IScattDialog(wx.Dialog):
 
     def __init__(
             self, parent, giface,
-            title=_("GRASS GIS Interactive Scatter Plot Tool"),
+            title=_("Interactive Scatter Plot Tool"),
             id=wx.ID_ANY, style=wx.DEFAULT_FRAME_STYLE, **kwargs):
         wx.Dialog.__init__(
             self,

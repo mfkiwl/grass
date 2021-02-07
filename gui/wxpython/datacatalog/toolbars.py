@@ -16,7 +16,7 @@ This program is free software under the GNU General Public License
 
 import wx
 from gui_core.toolbars import BaseToolbar
-from gui_core.wrap import StaticText, TextCtrl
+from gui_core.wrap import SearchCtrl
 from icons.icon import MetaIcon
 
 icons = {
@@ -27,11 +27,32 @@ icons = {
         img='reload',
         label=_("Reload current GRASS mapset only")),
     'unlocked': MetaIcon(
-        img='unlocked',
-        label=_("Click to restrict editing to current mapset only")),
+        img='edit',
+        label=_("Restrict edits to the current mapset only")),
     'locked': MetaIcon(
-        img='locked',
-        label=_("Click to allow editing other mapsets")),
+        img='edit',
+        label=_("Allow edits outside of the current mapset")),
+    'addGrassDB': MetaIcon(
+        img='grassdb-add',
+        label=_("Add existing or create new database")),
+    'addMapset': MetaIcon(
+        img='mapset-add',
+        label=_("Create new mapset in current location")),
+    'addLocation': MetaIcon(
+        img='location-add',
+        label=_("Create new location in current GRASS database")),
+    'downloadLocation': MetaIcon(
+        img='location-download',
+        label=_("Download sample location to current GRASS database")),
+    'importRaster': MetaIcon(
+        img='raster-import',
+        label=_("Import raster data  [r.import]")),
+    'importVector': MetaIcon(
+        img='vector-import',
+        label=_("Import vector data  [v.import]")),
+    'importLayer': MetaIcon(
+        img='layer-import',
+        label=_("Select another import option"))
 }
 
 
@@ -42,19 +63,32 @@ class DataCatalogToolbar(BaseToolbar):
     def __init__(self, parent):
         """Main toolbar constructor
         """
+
         BaseToolbar.__init__(self, parent)
 
         self.InitToolbar(self._toolbarData())
-        self.filter = TextCtrl(parent=self)
-        self.filter.SetSize((120, self.filter.GetBestSize()[1]))
+        self.filter_element = None
+        self.filter = SearchCtrl(parent=self)
+        self.filter.SetDescriptiveText(_('Search'))
+        self.filter.ShowCancelButton(True)
+        self.filter.SetSize((150, self.filter.GetBestSize()[1]))
         self.filter.Bind(wx.EVT_TEXT,
                          lambda event: self.parent.Filter(
-                         self.filter.GetValue()))
-        self.AddControl(StaticText(self, label=_("Search:")))
+                         self.filter.GetValue(), self.filter_element))
+        self.filter.Bind(wx.EVT_SEARCHCTRL_CANCEL_BTN,
+                         lambda evt: self.parent.Filter(''))
         self.AddControl(self.filter)
+        filterMenu = wx.Menu()
+        item = filterMenu.AppendRadioItem(-1, "All")
+        self.Bind(wx.EVT_MENU, self.OnFilterMenu, item)
+        item = filterMenu.AppendRadioItem(-1, "Raster maps")
+        self.Bind(wx.EVT_MENU, self.OnFilterMenu, item)
+        item = filterMenu.AppendRadioItem(-1, "Vector maps")
+        self.Bind(wx.EVT_MENU, self.OnFilterMenu, item)
+        item = filterMenu.AppendRadioItem(-1, "3D raster maps")
+        self.Bind(wx.EVT_MENU, self.OnFilterMenu, item)
+        self.filter.SetMenu(filterMenu)
         help = _("Type to search database by map type or name. "
-                 "Use prefix 'r:', 'v:' and 'r3:'"
-                 "to show only raster, vector or 3D raster data, respectively. "
                  "Use Python regular expressions to refine your search.")
         self.SetToolShortHelp(self.filter.GetId(), help)
         # realize the toolbar
@@ -69,8 +103,35 @@ class DataCatalogToolbar(BaseToolbar):
                                      ("reloadMapset", icons["reloadMapset"],
                                       self.parent.OnReloadCurrentMapset),
                                      ("lock", icons['locked'],
-                                      self.OnSetRestriction, wx.ITEM_CHECK)
-                                     ))
+                                      self.OnSetRestriction, wx.ITEM_CHECK),
+                                     ("addGrassDB", icons['addGrassDB'],
+                                      self.parent.OnAddGrassDB),
+                                     ("addLocation", icons['addLocation'],
+                                      self.parent.OnCreateLocation),
+                                     ("downloadLocation", icons['downloadLocation'],
+                                      self.parent.OnDownloadLocation),
+                                     ("addMapset", icons['addMapset'],
+                                      self.parent.OnCreateMapset),
+                                     ("importRaster", icons['importRaster'],
+                                      self.parent.OnImportGdalLayers),
+                                     ("importVector", icons['importVector'],
+                                      self.parent.OnImportOgrLayers),
+                                     ("importLayer", icons['importLayer'],
+                                      self.parent.OnImportMenu)))
+
+    def OnFilterMenu(self, event):
+        """Decide the element to filter by"""
+        filterMenu = self.filter.GetMenu().GetMenuItems()
+        self.filter_element = None
+        if filterMenu[1].IsChecked():
+            self.filter_element = 'raster'
+        elif filterMenu[2].IsChecked():
+            self.filter_element = 'vector'
+        elif filterMenu[3].IsChecked():
+            self.filter_element = 'raster_3d'
+        # trigger filter on change
+        if self.filter.GetValue():
+            self.parent.Filter(self.filter.GetValue(), self.filter_element)
 
     def OnSetRestriction(self, event):
         if self.GetToolState(self.lock):

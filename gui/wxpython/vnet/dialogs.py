@@ -26,13 +26,11 @@ This program is free software under the GNU General Public License
 
 import os
 import sys
-import types
 import six
 
 if sys.version_info.major >= 3:
     unicode = str
 
-from copy import copy
 from grass.script import core as grass
 
 import wx
@@ -43,14 +41,12 @@ except ImportError:
     import wx.lib.flatnotebook as FN
 import wx.lib.colourselect as csel
 import wx.lib.mixins.listctrl as listmix
-import wx.lib.scrolledpanel as scrolled
 
-from core import globalvar, utils
+from core import globalvar
 from core.gcmd import RunCommand, GMessage
 from core.settings import UserSettings
 
 from dbmgr.base import DbMgrBase
-from dbmgr.vinfo import VectorDBInfo
 
 from gui_core.widgets import GNotebook
 from gui_core.goutput import GConsoleWindow
@@ -74,7 +70,7 @@ from vnet.vnet_utils import DegreesToRadians, RadiansToDegrees, GetNearestNodeCa
 class VNETDialog(wx.Dialog):
 
     def __init__(self, parent, giface, id=wx.ID_ANY,
-                 title=_("GRASS GIS Vector Network Analysis Tool"),
+                 title=_("Vector Network Analysis Tool"),
                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER, **kwargs):
         """Dialog for vector network analysis"""
 
@@ -128,8 +124,7 @@ class VNETDialog(wx.Dialog):
 
         self.mainPanel = Panel(parent=self)
         self.notebook = GNotebook(parent=self.mainPanel,
-                                  style=FN.FNB_FANCY_TABS | FN.FNB_BOTTOM |
-                                  FN.FNB_NO_X_BUTTON)
+                                  style=globalvar.FNPageDStyle)
 
         # statusbar
         self.stPriorities = {'important': 5, 'iformation': 1}
@@ -358,8 +353,9 @@ class VNETDialog(wx.Dialog):
                               name='output')
 
         goutput = self.vnet_mgr.goutput  # TODO make interface
-        self.gwindow = GConsoleWindow(parent=outputPanel, gconsole=goutput)
-
+        self.gwindow = GConsoleWindow(
+            parent=outputPanel, giface=self.giface, gconsole=goutput
+        )
         # Layout
         outputSizer = wx.BoxSizer(wx.VERTICAL)
         outputSizer.Add(self.gwindow, proportion=1, flag=wx.EXPAND)

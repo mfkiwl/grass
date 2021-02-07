@@ -7,7 +7,7 @@
 #               Glynn Clements
 #               Martin Landa <landa.martin gmail.com>
 # PURPOSE:      Create HTML manual page snippets
-# COPYRIGHT:    (C) 2007-2017 by Glynn Clements
+# COPYRIGHT:    (C) 2007-2021 by Glynn Clements
 #                and the GRASS Development Team
 #
 #               This program is free software under the GNU General
@@ -22,6 +22,7 @@ import string
 import re
 from datetime import datetime
 import locale
+import json
 
 try:
     # Python 2 import
@@ -33,7 +34,6 @@ try:
     import urlparse
 except:
     import urllib.parse as urlparse
-
 
 if sys.version_info[0] == 2:
     PY2 = True
@@ -67,6 +67,9 @@ def decode(bytes_):
     return unicode(bytes_)
 
 
+html_page_footer_pages_path = os.getenv('HTML_PAGE_FOOTER_PAGES_PATH') if \
+    os.getenv('HTML_PAGE_FOOTER_PAGES_PATH') else ''
+
 pgm = sys.argv[1]
 
 src_file = "%s.html" % pgm
@@ -78,9 +81,11 @@ addons_url = "https://github.com/OSGeo/grass-addons/tree/master/"
 header_base = """<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
-<title>GRASS GIS Manual: ${PGM}</title>
-<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
-<link rel="stylesheet" href="grassdocs.css" type="text/css">
+ <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+ <title>${PGM} - GRASS GIS Manual</title>
+ <meta name="Author" content="GRASS Development Team">
+ <meta name="description" content="${PGM}: ${PGM_DESC}">
+ <link rel="stylesheet" href="grassdocs.css" type="text/css">
 </head>
 <body bgcolor="white">
 <div id="container">
@@ -110,15 +115,15 @@ footer_index = string.Template(
 """<hr class="header">
 <p>
 <a href="index.html">Main index</a> |
-<a href="${INDEXNAME}.html">${INDEXNAMECAP} index</a> |
-<a href="topics.html">Topics index</a> |
-<a href="keywords.html">Keywords index</a> |
-<a href="graphical_index.html">Graphical index</a> |
-<a href="full_index.html">Full index</a>
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}${INDEXNAME}.html">${INDEXNAMECAP} index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}topics.html">Topics index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}keywords.html">Keywords index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}graphical_index.html">Graphical index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}full_index.html">Full index</a>
 </p>
 <p>
 &copy; 2003-${YEAR}
-<a href="http://grass.osgeo.org">GRASS Development Team</a>,
+<a href="https://grass.osgeo.org">GRASS Development Team</a>,
 GRASS GIS ${GRASS_VERSION} Reference Manual
 </p>
 
@@ -131,14 +136,14 @@ footer_noindex = string.Template(
 """<hr class="header">
 <p>
 <a href="index.html">Main index</a> |
-<a href="topics.html">Topics index</a> |
-<a href="keywords.html">Keywords index</a> |
-<a href="graphical_index.html">Graphical index</a> |
-<a href="full_index.html">Full index</a>
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}topics.html">Topics index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}keywords.html">Keywords index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}graphical_index.html">Graphical index</a> |
+<a href="${HTML_PAGE_FOOTER_PAGES_PATH}full_index.html">Full index</a>
 </p>
 <p>
 &copy; 2003-${YEAR}
-<a href="http://grass.osgeo.org">GRASS Development Team</a>,
+<a href="https://grass.osgeo.org">GRASS Development Team</a>,
 GRASS GIS ${GRASS_VERSION} Reference Manual
 </p>
 
@@ -262,10 +267,35 @@ def update_toc(data):
 
     return '\n'.join(ret_data)
 
+
+def get_addon_path(pgm):
+    """Check if pgm is in addons list and get addon path
+
+    :param pgm str: pgm
+
+    :return tuple: (True, path) if pgm is addon else (None, None)
+    """
+    addon_base = os.getenv('GRASS_ADDON_BASE')
+    if addon_base:
+        """'addons_paths.json' is file created during install extension
+        check get_addons_paths() function in the g.extension.py file
+        """
+        addons_paths = os.path.join(addon_base, 'addons_paths.json')
+        if os.path.exists(addons_paths):
+            with open(addons_paths, 'r') as f:
+                addons_paths = json.load(f)
+            for addon in addons_paths['tree']:
+                split_path = addon['path'].split('/')
+                root_dir, module_dir = split_path[0], split_path[-1]
+                if 'grass7' == root_dir and pgm == module_dir:
+                    return True, addon['path']
+    return None, None
+
+
 # process header
 src_data = read_file(src_file)
 name = re.search('(<!-- meta page name:)(.*)(-->)', src_data, re.IGNORECASE)
-pgm_desc = None
+pgm_desc = "GRASS GIS Reference Manual"
 if name:
     pgm = name.group(2).strip().split('-', 1)[0].strip()
     name_desc = re.search('(<!-- meta page name description:)(.*)(-->)', src_data, re.IGNORECASE)
@@ -284,6 +314,29 @@ else:
 
 if not re.search('<html>', src_data, re.IGNORECASE):
     tmp_data = read_file(tmp_file)
+    """
+    Adjusting keywords html pages paths if add-on html man page
+    stored on the server
+    """
+    if html_page_footer_pages_path:
+        new_keywords_paths = []
+        orig_keywords_paths = re.search(
+            r'<h[1-9]>KEYWORDS</h[1-9]>(.*?)<h[1-9]>',
+            tmp_data, re.DOTALL,
+        )
+        if orig_keywords_paths:
+            search_txt = 'href="'
+            for i in orig_keywords_paths.group(1).split(','):
+                if search_txt in i:
+                    index = i.index(search_txt) + len(search_txt)
+                    new_keywords_paths.append(
+                        i[:index] + html_page_footer_pages_path + i[index:],
+                    )
+        if new_keywords_paths:
+            tmp_data = tmp_data.replace(
+                orig_keywords_paths.group(1),
+                ','.join(new_keywords_paths),
+            )
     if not re.search('<html>', tmp_data, re.IGNORECASE):
         sys.stdout.write(header_tmpl.substitute(PGM=pgm, PGM_DESC=pgm_desc))
     if tmp_data:
@@ -380,11 +433,34 @@ if sys.platform == 'win32':
     url_source = url_source.replace(os.path.sep, '/')
 
 if index_name:
-    sys.stdout.write(sourcecode.substitute(URL_SOURCE=url_source, PGM=pgm,
-                                           URL_LOG=url_source.replace('grass/tree',  'grass/commits')))
-    sys.stdout.write(footer_index.substitute(INDEXNAME=index_name,
-                                             INDEXNAMECAP=index_name_cap,
-                                             YEAR=year, GRASS_VERSION=grass_version))
+    tree = 'grass/tree'
+    commits = 'grass/commits'
+    is_addon, addon_path = get_addon_path(pgm=pgm)
+    if is_addon:
+        # Fix gui/wxpython addon url path
+        url_source = urlparse.urljoin(
+            os.environ['SOURCE_URL'], addon_path.split('/', 1)[1],
+        )
+        tree = 'grass-addons/tree'
+        commits = 'grass-addons/commits'
+
+    sys.stdout.write(sourcecode.substitute(
+        URL_SOURCE=url_source, PGM=pgm, URL_LOG=url_source.replace(
+            tree,  commits)))
+    sys.stdout.write(
+        footer_index.substitute(
+            INDEXNAME=index_name,
+            INDEXNAMECAP=index_name_cap,
+            YEAR=year,
+            GRASS_VERSION=grass_version,
+            HTML_PAGE_FOOTER_PAGES_PATH=html_page_footer_pages_path,
+        ),
+    )
 else:
-    sys.stdout.write(footer_noindex.substitute(YEAR=year,
-                                               GRASS_VERSION=grass_version))
+    sys.stdout.write(
+        footer_noindex.substitute(
+            YEAR=year,
+            GRASS_VERSION=grass_version,
+            HTML_PAGE_FOOTER_PAGES_PATH=html_page_footer_pages_path,
+        ),
+    )

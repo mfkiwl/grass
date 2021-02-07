@@ -25,8 +25,6 @@ import sys
 import time
 import stat
 import tempfile
-import copy
-import re
 import random
 import six
 
@@ -47,11 +45,10 @@ from core.gconsole        import GConsole, \
     EVT_CMD_RUN, EVT_CMD_DONE, EVT_CMD_PREPARE
 from gui_core.goutput import GConsoleWindow
 from core.debug import Debug
-from core.gcmd import GMessage, GException, GWarning, GError, RunCommand
+from core.gcmd import GMessage, GException, GWarning, GError
 from gui_core.dialogs import GetImageHandlers
 from gui_core.dialogs import TextEntryDialog as CustomTextEntryDialog
 from gui_core.ghelp import ShowAboutDialog
-from gui_core.preferences import PreferencesBaseDialog
 from core.settings import UserSettings
 from gui_core.menu import Menu as Menubar
 from gmodeler.menudata import ModelerMenuData
@@ -59,13 +56,13 @@ from gui_core.forms import GUI
 from gmodeler.preferences import PreferencesDialog, PropertiesDialog
 from gmodeler.toolbars import ModelerToolbar
 from core.giface import Notification
-from gui_core.pystc import PyStc
+from gui_core.pystc import PyStc, SetDarkMode
 from gmodeler.giface import GraphicalModelerGrassInterface
 from gmodeler.model import *
 from gmodeler.dialogs import *
 from gui_core.wrap import (
     Button, EmptyBitmap, ImageFromBitmap, Menu, NewId, StaticBox,
-    StaticText, StockCursor, TextCtrl,
+    StaticText, StockCursor, TextCtrl, IsDark
 )
 from gui_core.wrap import TextEntryDialog as wxTextEntryDialog
 
@@ -78,7 +75,7 @@ from grass.script import core as grass
 class ModelFrame(wx.Frame):
 
     def __init__(self, parent, giface, id=wx.ID_ANY,
-                 title=_("GRASS GIS Graphical Modeler"), **kwargs):
+                 title=_("Graphical Modeler"), **kwargs):
         """Graphical modeler main window
 
         :param parent: parent window
@@ -124,11 +121,11 @@ class ModelFrame(wx.Frame):
         self.statusbar = self.CreateStatusBar(number=1)
 
         self.notebook = GNotebook(parent=self,
-                                  style=FN.FNB_FANCY_TABS | FN.FNB_BOTTOM |
-                                  FN.FNB_NO_NAV_BUTTONS | FN.FNB_NO_X_BUTTON)
+                                  style=globalvar.FNPageDStyle)
 
         self.canvas = ModelCanvas(self)
-        self.canvas.SetBackgroundColour(wx.WHITE)
+        self.canvas.SetBackgroundColour(
+            wx.SystemSettings().GetColour(wx.SYS_COLOUR_WINDOW))
         self.canvas.SetCursor(self.cursors["default"])
 
         self.model = Model(self.canvas)
@@ -140,7 +137,9 @@ class ModelFrame(wx.Frame):
         self.pythonPanel = PythonPanel(parent=self)
 
         self._gconsole = GConsole(guiparent=self)
-        self.goutput = GConsoleWindow(parent=self, gconsole=self._gconsole)
+        self.goutput = GConsoleWindow(
+            parent=self, giface=giface, gconsole=self._gconsole
+        )
         self.goutput.showNotification.connect(
             lambda message: self.SetStatusText(message))
 
@@ -373,7 +372,7 @@ class ModelFrame(wx.Frame):
         dlg = PreferencesDialog(parent=self, giface=self._giface)
         dlg.CenterOnParent()
 
-        dlg.ShowModal()
+        dlg.Show()
         self.canvas.Refresh()
 
     def OnHelp(self, event):
@@ -794,7 +793,7 @@ class ModelFrame(wx.Frame):
     def OnAddAction(self, event):
         """Add action to model"""
         if self.searchDialog is None:
-            self.searchDialog = ModelSearchDialog(self)
+            self.searchDialog = ModelSearchDialog(parent=self, giface=self._giface)
             self.searchDialog.CentreOnParent()
         else:
             self.searchDialog.Reset()
@@ -1985,6 +1984,8 @@ class PythonPanel(wx.Panel):
         self.bodyBox = StaticBox(parent=self, id=wx.ID_ANY,
                                  label=" %s " % _("Python script"))
         self.body = PyStc(parent=self, statusbar=self.parent.GetStatusBar())
+        if IsDark():
+            SetDarkMode(self.body)
 
         self.btnRun = Button(parent=self, id=wx.ID_ANY, label=_("&Run"))
         self.btnRun.SetToolTip(_("Run python script"))

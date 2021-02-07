@@ -24,11 +24,11 @@ This program is free software under the GNU General Public License
 @author Original version improved by Martin Landa <landa.martin gmail.com>
 @author Rewritten by Markus Metz redesign georectfier -> GCP Manage
 @author Support for GraphicsSet added by Stepan Turek <stepan.turek seznam.cz> (2012)
-@author port i.image.2target (v6) to version 7 in 2017 by Yann 
+@author port i.image.2target (v6) to version 7 in 2017 by Yann
 """
 
 #TODO: i.ortho.transform has 6 appearances, check each of them and configure
-#TODO: i.ortho.transform looks for REF_POINTS/CONTROL_POINTS and not POINTS 
+#TODO: i.ortho.transform looks for REF_POINTS/CONTROL_POINTS and not POINTS
 #TODO: CHECK CONTROL_POINTS format and create it for i.ortho.transform to use.
 
 from __future__ import print_function
@@ -46,10 +46,8 @@ import wx.lib.colourselect as csel
 from core import globalvar
 if globalvar.wxPythonPhoenix:
     from wx import adv as wiz
-    from wx.adv import Wizard
 else:
     from wx import wizard as wiz
-    from wx.wizard import Wizard
 
 import grass.script as grass
 
@@ -65,7 +63,7 @@ from core.giface import Notification
 from gui_core.wrap import SpinCtrl, Button, StaticText, StaticBox, \
     CheckListBox, TextCtrl, Menu, ListCtrl, BitmapFromImage, CheckListCtrlMixin
 
-from location_wizard.wizard import TitledPage as TitledPage
+from location_wizard.wizard import GridBagSizerTitledPage as TitledPage
 
 #
 # global variables
@@ -122,7 +120,7 @@ class GCPWizard(object):
     #    self.extension = extension
     #    self.src_maps = self.src_map
     #    # location for xy map to georectify
-    #    self.newlocation = self.srcloc 
+    #    self.newlocation = self.srcloc
     #    # mapset for xy map to georectify
     #    self.newmapset = self.srcmpt
     def __init__(self, parent, giface):
@@ -1814,6 +1812,7 @@ class GCP(MapFrame, ColumnSorterMixin):
             self.TgtMap.Clean()
 
             self.grwiz.Cleanup()
+            self._mgr.UnInit()
 
             self.Destroy()
 
@@ -2755,11 +2754,10 @@ class GrSettingsDialog(wx.Dialog):
             parent=panel, id=wx.ID_ANY,
             label=_("Highlight RMS error > M + SD * factor:"))
         rmslabel.SetToolTip(
-            wx.ToolTip(
-                _(
-                    "Highlight GCPs with an RMS error larger than \n"
-                    "mean + standard deviation * given factor. \n"
-                    "Recommended values for this factor are between 1 and 2.")))
+            _(
+                "Highlight GCPs with an RMS error larger than \n"
+                "mean + standard deviation * given factor. \n"
+                "Recommended values for this factor are between 1 and 2."))
         rmsgridSizer.Add(
             rmslabel,
             flag=wx.ALIGN_CENTER_VERTICAL,

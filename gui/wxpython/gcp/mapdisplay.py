@@ -16,7 +16,6 @@ This program is free software under the GNU General Public License
 """
 
 import os
-import math
 import platform
 
 from core import globalvar
@@ -30,7 +29,6 @@ from core.gcmd import GMessage
 from gui_core.dialogs import GetImageHandlers, ImageSizeDialog
 from gui_core.mapdisp import SingleMapFrame
 from gui_core.wrap import Menu
-from core.settings import UserSettings
 from mapwin.buffered import BufferedMapWindow
 from mapwin.base import MapWindowProperties
 
@@ -47,7 +45,7 @@ class MapFrame(SingleMapFrame):
     """
 
     def __init__(self, parent, giface,
-                 title=_("GRASS GIS Manage Ground Control Points"),
+                 title=_("Manage Ground Control Points"),
                  toolbars=["gcpdisp"], Map=None, auimgr=None,
                  name='GCPMapWindow', **kwargs):
         """Main map display window with toolbars, statusbar and

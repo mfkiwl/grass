@@ -27,7 +27,6 @@ This program is free software under the GNU General Public License
 
 import os
 import sys
-import copy
 try:
     import pwd
     havePwd = True
@@ -44,10 +43,10 @@ import grass.script as grass
 from grass.exceptions import OpenError
 
 from core import globalvar
-from core.gcmd import RunCommand, GError
+from core.gcmd import GError
 from core.utils import ListOfMapsets, GetColorTables, ReadEpsgCodes
 from core.settings import UserSettings
-from core.globalvar import wxPythonPhoenix
+from core.globalvar import CheckWxVersion
 from gui_core.dialogs import SymbolDialog, DefaultFontDialog
 from gui_core.widgets import IntegerValidator, ColorTablesComboBox
 from core.debug import Debug
@@ -758,7 +757,7 @@ class PreferencesDialog(PreferencesBaseDialog):
         panel.SetSizer(border)
 
         # bindings
-        if sys.platform == 'darwin':
+        if sys.platform == 'darwin' and not CheckWxVersion([4, 0, 6]):
             outfontButton.Bind(wx.EVT_BUTTON, self.OnSetOutputFontCustomDialog)
         else:
             outfontButton.Bind(wx.EVT_BUTTON, self.OnSetOutputFont)

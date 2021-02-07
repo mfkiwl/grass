@@ -15,7 +15,6 @@ This program is free software under the GNU General Public License
 
 @author Anna Petrasova (kratochanna gmail.com)
 """
-import os
 
 import wx
 import wx.aui
@@ -177,7 +176,7 @@ class SimpleLayerManager(wx.Panel):
 
     def OnLayerChecked(self, event):
         """Layer was (un)checked, update layer's info."""
-        checkedIdxs = self._checkList.GetChecked()
+        checkedIdxs = self._checkList.GetCheckedItems()
         for i, layer in enumerate(self._layerList):
             if i in checkedIdxs and not layer.IsActive():
                 layer.Activate()

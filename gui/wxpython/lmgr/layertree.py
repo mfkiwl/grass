@@ -51,22 +51,6 @@ from lmgr.giface import LayerManagerGrassInterfaceForMapDisplay
 TREE_ITEM_HEIGHT = 25
 
 LMIcons = {
-    'rastImport': MetaIcon(img='layer-import',
-                           label=_('Import raster data')),
-    'rastLink': MetaIcon(img='layer-import',
-                         label=_('Link external raster data')),
-    'rastUnpack': MetaIcon(img='layer-import',
-                           label=_('Unpack GRASS raster map')),
-    'rastOut': MetaIcon(img='layer-export',
-                        label=_('Set raster output format')),
-    'vectImport': MetaIcon(img='layer-import',
-                           label=_('Import vector data')),
-    'vectLink': MetaIcon(img='layer-import',
-                         label=_('Link external vector data')),
-    'vectUnpack': MetaIcon(img='layer-import',
-                           label=_('Unpack GRASS vector map')),
-    'vectOut': MetaIcon(img='layer-export',
-                        label=_('Set vector output format')),
     'wmsImport': MetaIcon(img='layer-wms-add',
                           label=_('Import data from WMS server')),
     'layerCmd': MetaIcon(img='layer-command-add',
@@ -121,7 +105,9 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
                  id=wx.ID_ANY, style=wx.SUNKEN_BORDER,
                  ctstyle=CT.TR_HAS_BUTTONS | CT.TR_HAS_VARIABLE_ROW_HEIGHT |
                  CT.TR_HIDE_ROOT | CT.TR_ROW_LINES | CT.TR_FULL_ROW_HIGHLIGHT |
-                 CT.TR_MULTIPLE, **kwargs):
+                 CT.TR_MULTIPLE,
+                 title=None,
+                 **kwargs):
 
         if 'style' in kwargs:
             ctstyle |= kwargs['style']
@@ -176,7 +162,8 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
                 style=ctstyle,
                 **kwargs)
         self.SetName("LayerTree")
-        self.SetBackgroundColour("white")
+        self.SetBackgroundColour(
+            wx.SystemSettings().GetColour(wx.SYS_COLOUR_WINDOW))
 
         # SetAutoLayout() causes that no vertical scrollbar is displayed
         # when some layers are not visible in layer tree
@@ -197,11 +184,8 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
                                    style=wx.DEFAULT_FRAME_STYLE,
                                    tree=self, notebook=self.notebook,
                                    lmgr=self.lmgr, page=self.treepg,
-                                   Map=self.Map)
-
-        # here (with initial auto-generated names) we use just the
-        # number, not the whole name for simplicity
-        self.mapdisplay.SetTitleWithName(str(self.displayIndex + 1))
+                                   Map=self.Map,
+                                   title=title)
 
         # show new display
         if showMapDisplay is True:
@@ -236,6 +220,8 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
         self.Bind(wx.EVT_KEY_DOWN, self.OnKeyDown)
         self.Bind(wx.EVT_IDLE, self.OnIdle)
         self.Bind(wx.EVT_MOTION, self.OnMotion)
+
+        self._giface.grassdbChanged.connect(self.OnGrassDBChanged)
 
     def _setIcons(self, il):
         self._icon = {}
@@ -1037,7 +1023,7 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
     def OnVectorColorTable(self, event):
         """Set color table for vector map"""
         name = self.GetLayerInfo(self.layer_selected, key='maplayer').GetName()
-        GUI(parent=self, centreOnParent=self.centreFromsOnParent).ParseCommand(
+        GUI(parent=self, giface=self._giface, centreOnParent=self.centreFromsOnParent).ParseCommand(
             ['v.colors', 'map=%s' % name])
 
     def OnCopyMap(self, event):
@@ -1313,6 +1299,60 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
 
         event.Skip()
 
+    def OnGrassDBChanged(self, action, element, grassdb, location,
+                         mapset=None, map=None, newname=None):
+        """Handler of giface.grassDbChanged signal, updates layers in tree.
+         Covers cases when map or mapset is deleted or renamed."""
+        gisenv = grass.gisenv()
+        if not (gisenv['GISDBASE'] == grassdb
+                and gisenv['LOCATION_NAME'] == location):
+            return
+        if action not in ('delete', 'rename'):
+            return
+        if element in ('raster', 'vector', 'raster_3d'):
+            name = map + '@' + mapset if '@' not in map else map
+            items = self.FindItemByData(key='name', value=name)
+            if items:
+                for item in reversed(items):
+                    if action == 'delete':
+                        self.Delete(item)
+                    elif action == 'rename':
+                        # rename in command
+                        cmd = self.GetLayerInfo(item, key='cmd')
+                        for i in range(1, len(cmd)):
+                            if map in cmd[i].split('=')[-1]:
+                                cmd[i] = cmd[i].replace(map, newname)
+                        self.SetLayerInfo(item, key='cmd', value=cmd)
+                        self.ChangeLayer(item)
+                        # change label if not edited
+                        label = self.GetLayerInfo(item, key='label')
+                        if not label:
+                            newlabel = self.GetItemText(item).replace(map, newname)
+                            self.SetItemText(item, newlabel)
+        elif element == 'mapset':
+            items = []
+            item = self.GetFirstChild(self.root)[0]
+            while item and item.IsOk():
+                cmd = self.GetLayerInfo(item, key='cmd')
+                for each in cmd:
+                    if '@' + mapset in each:
+                        items.append(item)
+                        break
+                item = self.GetNextItem(item)
+            for item in reversed(items):
+                if action == 'delete':
+                    self.Delete(item)
+                elif action == 'rename':
+                    # rename in command
+                    cmd = self.GetLayerInfo(item, key='cmd')
+                    for i in range(1, len(cmd)):
+                        if mapset in cmd[i].split('=')[-1]:
+                            cmd[i] = cmd[i].replace(mapset, newname)
+                    self.SetLayerInfo(item, key='cmd', value=cmd)
+                    self.ChangeLayer(item)
+                    newlabel = self.GetItemText(item).replace('@' + mapset, '@' + newname)
+                    self.SetItemText(item, newlabel)
+
     def AddLayer(self, ltype, lname=None, lchecked=None, lopacity=1.0,
                  lcmd=None, lgroup=None, lvdigit=None, lnviz=None,
                  multiple=True, loadWorkspace=False):
@@ -1553,7 +1593,7 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
 
         cmd = None
         if self.GetLayerInfo(layer, key='cmd'):
-            module = GUI(parent=self, show=show,
+            module = GUI(parent=self, giface=self._giface, show=show,
                          centreOnParent=self.centreFromsOnParent)
             module.ParseCommand(self.GetLayerInfo(layer, key='cmd'),
                                 completed=(self.GetOptData, layer, params))
@@ -1568,7 +1608,8 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
                 cmd += GetDisplayVectSettings()
 
         if cmd:
-            module = GUI(parent=self, centreOnParent=self.centreFromsOnParent)
+            module = GUI(parent=self, giface=self._giface,
+                         centreOnParent=self.centreFromsOnParent)
             module.ParseCommand(cmd,
                                 completed=(self.GetOptData, layer, params))
 
@@ -1784,7 +1825,7 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
 
             if digitToolbar.GetLayer() == mapLayer:
                 self._setGradient('vdigit')
-            elif bgmap == mapLayer.GetName():
+            elif mapLayer and bgmap == mapLayer.GetName():
                 self._setGradient('bgmap')
             else:
                 self._setGradient()
@@ -2004,6 +2045,9 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
             mapName, found = GetLayerNameFromCmd(dcmd)
             mapLayer = self.GetLayerInfo(layer, key='maplayer')
             self.SetItemText(layer, mapName)
+            # calculates all the positions of the visible items
+            # fix length from item to next non-toplevel window position
+            self.CalculatePositions()
 
             if not mapText or not found:
                 propwin.Hide()
@@ -2151,11 +2195,21 @@ class LayerTree(treemixin.DragAndDrop, CT.CustomTreeCtrl):
 
         self.SetLayerInfo(item, key='maplayer', value=maplayer)
 
-        # if digitization tool enabled -> update list of available vector map
-        # layers
+        # if vector digitization tool enabled -> update list of
+        # available vector map layers
         if self.mapdisplay.GetToolbar('vdigit'):
             self.mapdisplay.GetToolbar(
                 'vdigit').UpdateListOfLayers(updateTool=True)
+
+        # if raster digitization tool enabled -> update list of
+        # available raster map layers
+        if self.mapdisplay.GetToolbar('rdigit'):
+            rasters = self.GetMap().GetListOfLayers(
+                ltype='raster', mapset=grass.gisenv()['MAPSET'])
+            self.mapdisplay.GetToolbar(
+                'rdigit').UpdateRasterLayers(rasters)
+            self.mapdisplay.GetToolbar(
+                'rdigit').SelectDefault()
 
         self.Map.SetLayers(self.GetVisibleLayers())
 

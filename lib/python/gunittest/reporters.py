@@ -95,12 +95,17 @@ class FileAnonymizer(object):
         # besides GISBASE and test recursion start directory (which is
         # supposed to be source root directory or similar) we can also try
         # to remove user home directory and GISDBASE
-        # we suppuse that we run in standard grass session
+        # we suppose that we run in standard grass session
         # TODO: provide more effective implementation
+
+        # regex for a trailing separator
+        path_end = r'[\\/]?'
         for path in self._paths_to_remove:
             for filename in filenames:
-                path_end = r'[\\/]?'
-                replace_in_file(filename, path + path_end, '')
+                # literal special characters (e.g., ^\()[]{}.*+-$) in path need
+                # to be escaped in a regex (2nd argument); otherwise, they will
+                # be interpreted as special characters
+                replace_in_file(filename, re.escape(path) + path_end, '')
 
 
 def get_source_url(path, revision, line=None):
@@ -315,6 +320,7 @@ class GrassTestFilesMultiReporter(object):
     which has this attribute using the order in which the reporters were
     provided.
     """
+
     def __init__(self, reporters, forgiving=False):
         self.reporters = reporters
         self.forgiving = forgiving
@@ -601,7 +607,7 @@ class GrassTestFilesHtmlReporter(GrassTestFilesCountingReporter):
                      nsper=percent_to_html(self.file_pass_per),
                      st=self.successes, ft=self.failures + self.errors,
                      total=self.total, pt=pass_per
-                     ))
+                 ))
 
         # this is the second place with this function
         # TODO: provide one implementation
@@ -702,7 +708,7 @@ class GrassTestFilesHtmlReporter(GrassTestFilesCountingReporter):
             .format(
                 m=module,
                 status=returncode_to_success_html_par(returncode),
-                ))
+            ))
 
         # TODO: include optionally hyper link to test suite
         # TODO: file_path is reconstucted in a naive way
@@ -747,7 +753,7 @@ class GrassTestFilesHtmlReporter(GrassTestFilesCountingReporter):
             '<ul>'
             '<li><a href="stdout.html">standard output (stdout)</a></li>'
             '<li><a href="stderr.html">standard error output (stderr)</a></li>'
-            )
+        )
         file_index.write(files_section)
 
         supplementary_files = test_summary.get('supplementary_files', None)
@@ -1040,7 +1046,7 @@ class TestsuiteDirReporter(object):
             '<th>Tests</th><th>Successful</td>'
             '<th>Failed</th><th>Percent successful</th>'
             '</tr></thead><tbody>'
-            )
+        )
         page.write(head)
         page.write(tests_table_head)
         for test_file_name in test_files:
@@ -1155,7 +1161,7 @@ class TestsuiteDirReporter(object):
         head = (
             '<html><body>'
             '<h1>Testsuites results</h1>'
-            )
+        )
         tests_table_head = (
             '<table>'
             '<thead><tr>'
@@ -1166,7 +1172,7 @@ class TestsuiteDirReporter(object):
             '<th>Tests</th><th>Successful</td>'
             '<th>Failed</th><th>Percent successful</th>'
             '</tr></thead><tbody>'
-            )
+        )
         page.write(head)
         page.write(tests_table_head)
 

@@ -61,7 +61,6 @@ else:
     import queue as Queue
     unicode = str
 
-import re
 import codecs
 
 from threading import Thread
@@ -103,10 +102,10 @@ from core import gcmd
 from core import utils
 from core.settings import UserSettings
 from gui_core.widgets import FloatValidator, GNotebook, FormNotebook, FormListbook
-from core.giface import Notification
+from core.giface import Notification, StandaloneGrassInterface
 from gui_core.widgets import LayersList
-from gui_core.wrap import BitmapFromImage, Button, StaticText, StaticBox, SpinCtrl, \
-    CheckBox, BitmapButton, TextCtrl, NewId
+from gui_core.wrap import BitmapFromImage, Button, CloseButton, StaticText, \
+    StaticBox, SpinCtrl, CheckBox, BitmapButton, TextCtrl, NewId
 from core.debug import Debug
 
 wxUpdateDialog, EVT_DIALOG_UPDATE = NewEvent()
@@ -469,6 +468,7 @@ class TaskFrame(wx.Frame):
 
     def __init__(self, parent, giface, task_description, id=wx.ID_ANY,
                  get_dcmd=None, layer=None,
+                 title=None,
                  style=wx.DEFAULT_FRAME_STYLE | wx.TAB_TRAVERSAL, **kwargs):
         self.get_dcmd = get_dcmd
         self.layer = layer
@@ -478,13 +478,9 @@ class TaskFrame(wx.Frame):
 
         self.dialogClosing = Signal('TaskFrame.dialogClosing')
 
-        # module name + keywords
-        title = self.task.get_name()
-        try:
-            if self.task.keywords != ['']:
-                title += " [" + ', '.join(self.task.keywords) + "]"
-        except ValueError:
-            pass
+        # Module name as title by default
+        if not title:
+            title = self.task.get_name()
 
         wx.Frame.__init__(self, parent=parent, id=id, title=title,
                           name="MainFrame", style=style, **kwargs)
@@ -572,11 +568,7 @@ class TaskFrame(wx.Frame):
         # buttons
         btnsizer = wx.BoxSizer(orient=wx.HORIZONTAL)
         # cancel
-        if sys.platform == 'darwin':
-            # stock id automatically adds ctrl-c shortcut to close dialog
-            self.btn_cancel = Button(parent=self.panel, label=_("Close"))
-        else:
-            self.btn_cancel = Button(parent=self.panel, id=wx.ID_CLOSE)
+        self.btn_cancel = CloseButton(parent=self.panel)
         self.btn_cancel.SetToolTip(
             _("Close this window without executing the command (Ctrl+Q)"))
         btnsizer.Add(
@@ -586,9 +578,9 @@ class TaskFrame(wx.Frame):
             border=10)
         self.btn_cancel.Bind(wx.EVT_BUTTON, self.OnCancel)
         # bind closing to ESC and CTRL+Q
-        self.Bind(wx.EVT_MENU, self.OnCancel, id=wx.ID_CLOSE)
-        accelTableList = [(wx.ACCEL_NORMAL, wx.WXK_ESCAPE, wx.ID_CLOSE)]
-        accelTableList.append((wx.ACCEL_CTRL, ord('Q'), wx.ID_CLOSE))
+        self.Bind(wx.EVT_MENU, self.OnCancel, id=wx.ID_CANCEL)
+        accelTableList = [(wx.ACCEL_NORMAL, wx.WXK_ESCAPE, wx.ID_CANCEL)]
+        accelTableList.append((wx.ACCEL_CTRL, ord('Q'), wx.ID_CANCEL))
         # TODO: bind Ctrl-t for tile windows here (trac #2004)
 
         if self.get_dcmd is not None:  # A callback has been set up
@@ -611,7 +603,6 @@ class TaskFrame(wx.Frame):
                 parent=self.panel, id=wx.ID_OK, label=_("&Run"))
             self.btn_run.SetToolTip(_("Run the command (Ctrl+R)"))
             self.btn_run.SetDefault()
-            self.btn_run.SetForegroundColour(wx.Colour(35, 142, 35))
 
             btnsizer.Add(self.btn_run, proportion=0,
                          flag=wx.ALL | wx.ALIGN_CENTER,
@@ -622,17 +613,14 @@ class TaskFrame(wx.Frame):
             accelTableList.append((wx.ACCEL_CTRL, ord('R'), wx.ID_OK))
 
         # copy
-        if sys.platform == 'darwin':
-            # stock id automatically adds ctrl-c shortcut to copy command
-            self.btn_clipboard = Button(parent=self.panel, label=_("Copy"))
-        else:
-            self.btn_clipboard = Button(parent=self.panel, id=wx.ID_COPY)
+        self.btn_clipboard = Button(
+            parent=self.panel, id=wx.ID_ANY, label=_("Copy"))
         self.btn_clipboard.SetToolTip(
             _("Copy the current command string to the clipboard"))
         btnsizer.Add(self.btn_clipboard, proportion=0,
                      flag=wx.ALL | wx.ALIGN_CENTER,
                      border=10)
-        self.btn_clipboard.Bind(wx.EVT_BUTTON, self.OnCopy)
+        self.btn_clipboard.Bind(wx.EVT_BUTTON, self.OnCopyCommand)
 
         # help
         self.btn_help = Button(parent=self.panel, id=wx.ID_HELP)
@@ -728,10 +716,10 @@ class TaskFrame(wx.Frame):
             scale = 0.50
         self.SetSize(
             wx.Size(
-                sizeFrame[0],
-                sizeFrame[1] + scale * max(
+                round(sizeFrame[0]),
+                round(sizeFrame[1] + scale * max(
                     self.notebookpanel.panelMinHeight,
-                    self.notebookpanel.constrained_size[1])))
+                    self.notebookpanel.constrained_size[1]))))
 
         # thread to update dialog
         # create queues
@@ -875,7 +863,7 @@ class TaskFrame(wx.Frame):
         event = wxCmdAbort(aborted=True)
         wx.PostEvent(self._gconsole, event)
 
-    def OnCopy(self, event):
+    def OnCopyCommand(self, event):
         """Copy the command"""
         cmddata = wx.TextDataObject()
         # list -> string
@@ -1460,7 +1448,8 @@ class CmdPanel(wx.Panel):
                                     for layer in layers:
                                         if layer.type != p.get('prompt'):
                                             continue
-                                        mapList.append(str(layer))
+                                        if str(layer):
+                                            mapList.append(str(layer))
                         selection = gselect.Select(
                             parent=which_panel, id=wx.ID_ANY,
                             size=globalvar.DIALOG_GSELECT_SIZE, type=elem,
@@ -2286,6 +2275,7 @@ class CmdPanel(wx.Panel):
                 guiparent=self.notebook, giface=self._giface)
             self.goutput = GConsoleWindow(
                 parent=self.notebook,
+                giface=self._giface,
                 gconsole=self._gconsole,
                 margin=False)
             self._gconsole.Bind(
@@ -3003,7 +2993,7 @@ class GrassGUIApp(wx.App):
 
         self.mf = TaskFrame(
             parent=None,
-            giface=None,
+            giface=StandaloneGrassInterface(),
             task_description=self.grass_task)
         self.mf.CentreOnScreen()
         self.mf.Show(True)

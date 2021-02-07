@@ -23,13 +23,39 @@
 #include <proj.h>
 #define RAD_TO_DEG    57.295779513082321
 #define DEG_TO_RAD   .017453292519943296
+
+/* adapted from gdal_version.h */
+#ifndef PROJ_COMPUTE_VERSION
+#define PROJ_COMPUTE_VERSION(maj,min,rev) ((maj)*1000000+(min)*10000+(rev)*100)
+#endif
+
+/* just in case PROJ introduces PROJ_VERSION_NUM in a future version */
+#ifdef PROJ_VERSION_NUM
+#undef PROJ_VERSION_NUM
+#endif
+#define PROJ_VERSION_NUM      (PROJ_COMPUTE_VERSION(PROJ_VERSION_MAJOR,PROJ_VERSION_MINOR,PROJ_VERSION_PATCH))
+
+#ifndef PJ_WKT2_LATEST
+/* update if new PROJ versions support new WKT2 standards */
+#if PROJ_VERSION_NUM < 6030000
+#define PJ_WKT2_LATEST PJ_WKT2_2018
+#else
+#define PJ_WKT2_LATEST PJ_WKT2_2019
+#endif
+#endif
+
 #else
 #include <proj_api.h>
 #define PJ_FWD 	 1
 #define PJ_INV 	-1
+/* PROJ_VERSION_MAJOR is not set in the old PROJ API */
+#define PROJ_VERSION_MAJOR 4
 #endif
 #ifdef HAVE_OGR
 #    include <ogr_srs_api.h>
+#    if PROJ_VERSION_MAJOR >= 6 && GDAL_VERSION_MAJOR < 3
+#        error "PROJ 6+ requires GDAL 3+"
+#    endif
 #endif
 
 /* Data Files */
@@ -52,6 +78,7 @@ struct pj_info
     char proj[100];
     char *def;
     char *srid;
+    char *wkt;
 };
 
 struct gpj_datum
@@ -60,6 +87,7 @@ struct gpj_datum
     double dx, dy, dz;
 };
 
+/* no longer needed with PROJ6+ */
 struct gpj_datum_transform_list
 {
 

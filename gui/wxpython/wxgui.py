@@ -22,7 +22,6 @@ from __future__ import print_function
 import os
 import sys
 import getopt
-import atexit
 
 # i18n is taken care of in the grass library code.
 # So we need to import it before any of the GUI code.
@@ -63,6 +62,10 @@ class GMApp(wx.App):
 
         :return: True
         """
+        # Internal and display name of the app (if supported by/on platform)
+        self.SetAppName("GRASS GIS")
+        self.SetVendorName("The GRASS Development Team")
+
         # create splash screen
         introImagePath = os.path.join(globalvar.IMGDIR, "splash_screen.png")
         introImage = wx.Image(introImagePath, wx.BITMAP_TYPE_PNG)
@@ -111,6 +114,11 @@ class GMApp(wx.App):
 
         return True
 
+    def OnExit(self):
+        """Clean up on exit"""
+        unregisterPid(os.getpid())
+        return super().OnExit()
+
 
 def printHelp():
     """ Print program help"""
@@ -135,10 +143,6 @@ def process_opt(opts, args):
                 workspaceFile = args.pop(0)
 
     return workspaceFile
-
-
-def cleanup():
-    unregisterPid(os.getpid())
 
 
 def main(argv=None):
@@ -169,5 +173,4 @@ def main(argv=None):
     app.MainLoop()
 
 if __name__ == "__main__":
-    atexit.register(cleanup)
     sys.exit(main())

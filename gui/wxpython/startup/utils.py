@@ -9,6 +9,7 @@ This program is free software under the GNU General Public License
 (>=v2). Read the file COPYING that comes with GRASS for details.
 
 @author Vaclav Petras <wenzeslaus gmail com>
+@author Linda Kladivova <l.kladivova@seznam.cz>
 
 This file should not use (import) anything from GUI code (wx or wxGUI).
 This can potentially be part of the Python library (i.e. it needs to
@@ -17,96 +18,125 @@ solve the errors etc. in a general manner).
 
 
 import os
-import shutil
+import tempfile
+import getpass
+import sys
+from shutil import copytree, ignore_patterns
 
 
 def get_possible_database_path():
-    """Finds a path to what is possibly a GRASS Database. 
+    """Looks for directory 'grassdata' (case-insensitive) in standard
+    locations to detect existing GRASS Database.
 
-    Looks for directory named grassdata in the usual locations.
-
-    Returns the path as a string or None if nothing was found, so the
-    return value can be used to test if the directory was found.
+    Returns the path as a string or None if nothing was found.
     """
-    home = os.path.expanduser('~')
+    home = os.path.expanduser("~")
+
     # try some common directories for grassdata
-    # grassdata (lowercase) in home for Linux (first choice)
-    # Documents and My Documents for Windows
-    # potential translations (old Windows and some Linux)
-    # but ~ and ~/Documents should cover most of the cases
-    # ordered by preference and then likelihood
     candidates = [
-        os.path.join(home, "grassdata"),
-        os.path.join(home, "Documents", "grassdata"),
-        os.path.join(home, "My Documents", "grassdata"),
+        home,
+        os.path.join(home, "Documents"),
     ]
-    try:
-        # here goes everything which has potential unicode issues
-        candidates.append(os.path.join(home, _("Documents"), "grassdata"))
-        candidates.append(os.path.join(home, _("My Documents"), "grassdata"))
-    except UnicodeDecodeError:
-        # just ignore the errors if it doesn't work
-        pass
-    path = None
+
+    # find possible database path
     for candidate in candidates:
         if os.path.exists(candidate):
-            path = candidate
-            break  # get the first match
-    return path
+            for subdir in next(os.walk(candidate))[1]:
+                if "grassdata" in subdir.lower():
+                    return os.path.join(candidate, subdir)
+    return None
 
 
-def get_lockfile_if_present(database, location, mapset):
-    """Return path to lock if present, None otherwise
+def create_database_directory():
+    """Creates the standard GRASS GIS directory.
+    Creates database directory named grassdata in the standard location
+    according to the platform.
 
-    Returns the path as a string or None if nothing was found, so the
-    return value can be used to test if the lock is present.
+    Returns the new path as a string or None if nothing was found or created.
     """
-    lock_name = '.gislock'
-    lockfile = os.path.join(database, location, mapset, lock_name)
-    if os.path.isfile(lockfile):
-        return lockfile
+    home = os.path.expanduser("~")
+
+    # Determine the standard path according to the platform
+    if sys.platform == "win32":
+        path = os.path.join(home, "Documents", "grassdata")
     else:
-        return None
+        path = os.path.join(home, "grassdata")
+
+    # Create "grassdata" directory
+    try:
+        os.mkdir(path)
+        return path
+    except OSError:
+        pass
+
+    # Create a temporary "grassdata" directory if GRASS is running
+    # in some special environment and the standard directories
+    # cannot be created which might be the case in some "try out GRASS"
+    # use cases.
+    path = os.path.join(tempfile.gettempdir(), "grassdata_{}".format(getpass.getuser()))
+
+    # The created tmp is not cleaned by GRASS, so we are relying on
+    # the system to do it at some point. The positive outcome is that
+    # another GRASS instance will find the data created by the first
+    # one which is desired in the "try out GRASS" use case we are
+    # aiming towards."
+    if os.path.exists(path):
+        return path
+    try:
+        os.mkdir(path)
+        return path
+    except OSError:
+        pass
+
+    return None
 
 
-def create_mapset(database, location, mapset):
-    """Creates a mapset in a specified location"""
-    location_path = os.path.join(database, location)
-    mapset_path = os.path.join(location_path, mapset)
-    # create an empty directory
-    os.mkdir(mapset_path)
-    # copy DEFAULT_WIND file and its permissions from PERMANENT 
-    # to WIND in the new mapset
-    region_path1 = os.path.join(location_path, 'PERMANENT', 'DEFAULT_WIND')
-    region_path2 = os.path.join(location_path, mapset, 'WIND')
-    shutil.copy(region_path1, region_path2)
-    # set permissions to u+rw,go+r (disabled; why?)
-    # os.chmod(os.path.join(database,location,mapset,'WIND'), 0644)
+def _get_startup_location_in_distribution():
+    """Check for startup location directory in distribution.
+
+    Returns startup location if found or None if nothing was found.
+    """
+    gisbase = os.getenv("GISBASE")
+    startup_location = os.path.join(gisbase, "demolocation")
+
+    # Find out if startup location exists
+    if os.path.exists(startup_location):
+        return startup_location
+    return None
 
 
-def delete_mapset(database, location, mapset):
-    """Deletes a specified mapset"""
-    if mapset == 'PERMANENT':
-        # TODO: translatable or not?
-        raise ValueError("Mapset PERMANENT cannot be deleted"
-                         " (whole location can be)")
-    shutil.rmtree(os.path.join(database, location, mapset))
+def _copy_startup_location(startup_location, location_in_grassdb):
+    """Copy the simple startup_location with some data to GRASS database.
+
+    Returns True if successfully copied or False
+    when an error was encountered.
+    """
+    # Copy source startup location into GRASS database
+    try:
+        copytree(startup_location, location_in_grassdb,
+                 ignore=ignore_patterns('*.tmpl', 'Makefile*'))
+        return True
+    except (IOError, OSError):
+        pass
+    return False
 
 
-def delete_location(database, location):
-    """Deletes a specified location"""
-    shutil.rmtree(os.path.join(database, location))
+def create_startup_location_in_grassdb(grassdatabase, startup_location_name):
+    """Create a new startup location in the given GRASS database.
 
+    Returns True if a new startup location successfully created
+    in the given GRASS database.
+    Returns False if there is no location to copy in the installation
+    or copying failed.
+    """
 
+    # Find out if startup location exists
+    startup_location = _get_startup_location_in_distribution()
+    if not startup_location:
+        return False
 
-def rename_mapset(database, location, old_name, new_name):
-    """Rename mapset from *old_name* to *new_name*"""
-    location_path = os.path.join(database, location)
-    os.rename(os.path.join(location_path, old_name),
-              os.path.join(location_path, new_name))
-
-
-def rename_location(database, old_name, new_name):
-    """Rename location from *old_name* to *new_name*"""
-    os.rename(os.path.join(database, old_name),
-              os.path.join(database, new_name))
+    # Copy the simple startup_location with some data to GRASS database
+    location_in_grassdb = os.path.join(grassdatabase, startup_location_name)
+    if _copy_startup_location(startup_location, location_in_grassdb):
+        return True
+    return False

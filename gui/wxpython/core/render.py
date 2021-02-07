@@ -27,7 +27,6 @@ import glob
 import math
 import copy
 import tempfile
-import types
 import time
 
 import wx
@@ -36,7 +35,6 @@ from grass.script import core as grass
 from grass.script.utils import try_remove, text_to_string
 from grass.script.task import cmdlist_to_tuple, cmdtuple_to_list
 from grass.pydispatch.signal import Signal
-from grass.exceptions import CalledModuleError
 
 from core import utils
 from core.ws import RenderWMSMgr
@@ -529,6 +527,10 @@ class RenderMapMgr(wx.EvtHandler):
                 # is rendered but its size differes from current env
                 if not layer.forceRender and (size[0] != w or size[1] != h):
                     layer.forceRender = True
+            # Force render cmd (e.g. d.mon start=wx0 && d.rast elevation)
+            # mapfile size is default d.mon size 720 x 480
+            elif not size and layer.IsRendered():
+                layer.forceRender = True
 
     def UpdateRenderEnv(self, env):
         self._render_env.update(env)
@@ -839,7 +841,7 @@ class Map(object):
 
         for line in ret.splitlines():
             if ':' in line:
-                key, val = map(lambda x: x.strip(), line.split(':'))
+                key, val = map(lambda x: x.strip(), line.split(':', 1))
                 if key in ['units']:
                     val = val.lower()
                 projinfo[key] = val
@@ -1375,7 +1377,8 @@ class Map(object):
                     os.remove(f)
 
             if layer.GetType() in ('vector', 'thememap'):
-                os.remove(layer._legrow)
+                if os.path.isfile(layer._legrow):
+                    os.remove(layer._legrow)
 
             list.remove(layer)
 

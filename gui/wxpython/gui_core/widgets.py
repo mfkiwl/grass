@@ -20,6 +20,8 @@ Classes:
  - widgets::NTCValidator
  - widgets::SimpleValidator
  - widgets::GenericValidator
+ - widgets::GenericMultiValidator
+ - widgets::LayersListValidator
  - widgets::GListCtrl
  - widgets::SearchModuleWidget
  - widgets::ManageSettingsWidget
@@ -72,10 +74,6 @@ try:
     from wx.lib.buttons import ThemedGenBitmapTextButton as BitmapTextButton
 except ImportError:  # not sure about TGBTButton version
     from wx.lib.buttons import GenBitmapTextButton as BitmapTextButton
-try:
-    import wx.lib.agw.customtreectrl as CT
-except ImportError:
-    import wx.lib.customtreectrl as CT
 
 if wxPythonPhoenix:
     from wx import Validator as Validator
@@ -497,7 +495,7 @@ class SymbolButton(BitmapTextButton):
         elif usage == 'pause':
             self.DrawPause(dc, size)
 
-        if sys.platform != "win32":
+        if sys.platform not in ("win32", "darwin"):
             buffer.SetMaskColour(maskColor)
         self.SetBitmapLabel(buffer)
         dc.SelectObject(wx.NullBitmap)
@@ -864,6 +862,50 @@ class MapValidator(GenericValidator):
                                   _mapNameValidationFailed)
 
 
+class GenericMultiValidator(Validator):
+    """This validator checks conditions and calls callbacks
+    in case the condition is not fulfilled.
+    """
+
+    def __init__(self, checks):
+        """Standard constructor.
+
+        :param checks: list of tuples consisting of conditions (list of
+        functions which accepts string value and returns T/F) and callbacks (
+        list of functions which is called when condition is not fulfilled)
+        """
+        Validator.__init__(self)
+        self._checks = checks
+
+    def Clone(self):
+        """Standard cloner.
+
+        Note that every validator must implement the Clone() method.
+        """
+        return GenericMultiValidator(self._checks)
+
+    def Validate(self, win):
+        """Validate the contents of the given text control.
+        """
+        ctrl = self.GetWindow()
+        text = ctrl.GetValue()
+        for condition, callback in self._checks:
+            if not condition(text):
+                callback(ctrl)
+                return False
+        return True
+
+    def TransferToWindow(self):
+        """Transfer data from validator to window.
+        """
+        return True  # Prevent wxDialog from complaining.
+
+    def TransferFromWindow(self):
+        """Transfer data from window to validator.
+        """
+        return True  # Prevent wxDialog from complaining.
+
+
 class SingleSymbolPanel(wx.Panel):
     """Panel for displaying one symbol.
 
@@ -934,6 +976,55 @@ class SingleSymbolPanel(wx.Panel):
         self.Refresh()
 
 
+class LayersListValidator(GenericValidator):
+    """This validator check output map existence"""
+
+    def __init__(self, condition, callback):
+        """Standard constructor.
+
+        :param condition: function which accepts string value and returns T/F
+        :param callback: function which is called when condition is not fulfilled
+        """
+        GenericValidator.__init__(self, condition, callback)
+
+    def Clone(self):
+        """Standard cloner.
+
+        Note that every validator must implement the Clone() method.
+        """
+        return LayersListValidator(self._condition, self._callback)
+
+    def Validate(self, win, validate_all=False):
+        """Validate output map existence"""
+        mapset = grass.gisenv()['MAPSET']
+        maps = grass.list_grouped(type=self._condition)[mapset]
+
+        # Check all selected layers
+        if validate_all:
+            outputs = []
+            data = win.GetLayers()
+
+            if data is None:
+                return False
+
+            for layer, output, list_id in data:
+                if output in maps:
+                    outputs.append(output)
+
+            if outputs:
+                win.output_map = outputs
+                self._callback(layers_list=win)
+                return False
+        else:
+            output_map = win.GetItemText(
+                win.col, win.row)
+            if output_map in maps:
+                win.output_map = output_map
+                self._callback(layers_list=win)
+                return False
+        return True
+
+
 class GListCtrl(ListCtrl, listmix.ListCtrlAutoWidthMixin,
                 CheckListCtrlMixin):
     """Generic ListCtrl with popup menu to select/deselect all
@@ -972,27 +1063,24 @@ class GListCtrl(ListCtrl, listmix.ListCtrlAutoWidthMixin,
         self.PopupMenu(menu)
         menu.Destroy()
 
-    def OnSelectAll(self, event):
-        """Select all items"""
+    def SelectAll(self, select=True):
+        """Check or uncheck all items"""
         item = -1
-
         while True:
             item = self.GetNextItem(item)
             if item == -1:
                 break
-            self.CheckItem(item, True)
+            self.CheckItem(item, select)
+
+    def OnSelectAll(self, event):
+        """Check all items"""
+        self.SelectAll(select=True)
 
         event.Skip()
 
     def OnSelectNone(self, event):
-        """Deselect items"""
-        item = -1
-
-        while True:
-            item = self.GetNextItem(item, wx.LIST_STATE_SELECTED)
-            if item == -1:
-                break
-            self.CheckItem(item, False)
+        """Uncheck items"""
+        self.SelectAll(select=False)
 
         event.Skip()
 
@@ -1620,6 +1708,10 @@ class LayersList(GListCtrl, listmix.TextEditMixin):
         GListCtrl.__init__(self, parent)
 
         self.log = log
+        self.row = None
+        self.col = None
+        self.output_map = None
+        self.validate = True
 
         # setup mixins
         listmix.TextEditMixin.__init__(self)
@@ -1674,3 +1766,22 @@ class LayersList(GListCtrl, listmix.TextEditMixin):
             layers.append((layer, output, itm[-1]))
 
         return layers
+
+    def ValidateOutputMapName(self):
+        """Validate output map name"""
+        wx.CallAfter(self.GetValidator().Validate, self)
+
+    def OpenEditor(self, row, col):
+        """Open editor"""
+        self.col = col
+        self.row = row
+        super().OpenEditor(row, col)
+
+    def CloseEditor(self, event=None):
+        """Close editor"""
+        if event:
+            if event.IsCommandEvent():
+                listmix.TextEditMixin.CloseEditor(self, event)
+                if self.validate:
+                    self.ValidateOutputMapName()
+            event.Skip()

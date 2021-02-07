@@ -105,9 +105,7 @@ class AboutWindow(wx.Frame):
 
     def _doLayout(self):
         btnSizer = wx.BoxSizer(wx.HORIZONTAL)
-        btnSizer.Add(self.btnClose, proportion=0,
-                     flag=wx.ALL | wx.ALIGN_RIGHT,
-                     border=5)
+        btnSizer.Add(self.btnClose, proportion=0, flag=wx.ALL, border=5)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.aboutNotebook, proportion=1,
@@ -130,7 +128,6 @@ class AboutWindow(wx.Frame):
             sys.stderr.write(_("Unable to get GRASS version\n"))
 
         infoTxt = ScrolledPanel(self.aboutNotebook)
-        infoTxt.SetBackgroundColour('WHITE')
         infoTxt.SetupScrolling()
         infoSizer = wx.BoxSizer(wx.VERTICAL)
         infoGridSizer = wx.GridBagSizer(vgap=5, hgap=5)
@@ -226,10 +223,7 @@ class AboutWindow(wx.Frame):
 
         infoGridSizer.AddGrowableCol(0)
         infoGridSizer.AddGrowableCol(1)
-        infoSizer.Add(
-            infoGridSizer,
-            proportion=1,
-            flag=wx.EXPAND | wx.ALIGN_CENTER | wx.ALIGN_CENTER_VERTICAL)
+        infoSizer.Add(infoGridSizer, proportion=1, flag=wx.EXPAND)
 
         row += 2
         infoGridSizer.Add(StaticText(parent=infoTxt, id=wx.ID_ANY,
@@ -465,7 +459,6 @@ class AboutWindow(wx.Frame):
             translators = None
 
         translatorswin = ScrolledPanel(self.aboutNotebook)
-        translatorswin.SetBackgroundColour('WHITE')
         translatorswin.SetAutoLayout(True)
         translatorswin.SetupScrolling()
         translatorswin.sizer = wx.BoxSizer(wx.VERTICAL)
@@ -630,7 +623,6 @@ class AboutWindow(wx.Frame):
         else:
             jsStats = None
         self.statswin = ScrolledPanel(self.aboutNotebook)
-        self.statswin.SetBackgroundColour('WHITE')
         self.statswin.SetAutoLayout(True)
 
         if not jsStats:
@@ -909,7 +901,7 @@ def ShowAboutDialog(prgName, startYear):
                 'grass.ico'),
             wx.BITMAP_TYPE_ICO))
     info.SetName(prgName)
-    info.SetWebSite('http://grass.osgeo.org')
+    info.SetWebSite('https://grass.osgeo.org')
     info.SetDescription(
         _grassDevTeam(startYear) +
         '\n\n' +

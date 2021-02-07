@@ -6,6 +6,7 @@ from multiple methods.
 
 Classes:
  - wizard::TitledPage
+ - wizard::GridBagSizerTitledPage
  - wizard::DatabasePage
  - wizard::CoordinateSystemPage
  - wizard::ProjectionsPage
@@ -33,9 +34,9 @@ This program is free software under the GNU General Public License
 @author Hamish Bowman (planetary ellipsoids)
 """
 import os
-import sys
 import locale
 import six
+import functools
 
 import wx
 import wx.lib.mixins.listctrl as listmix
@@ -52,13 +53,13 @@ import wx.lib.scrolledpanel as scrolled
 
 from core import utils
 from core.utils import cmp
-from core.gcmd import RunCommand, GError, GMessage, GWarning
-from gui_core.widgets import GenericValidator
+from core.gcmd import RunCommand, GError, GWarning
+from gui_core.widgets import GenericMultiValidator
 from gui_core.wrap import SpinCtrl, SearchCtrl, StaticText, \
-    TextCtrl, Button, CheckBox, StaticBox, NewId, ListCtrl
-from location_wizard.base import BaseClass
+    TextCtrl, Button, CheckBox, StaticBox, NewId, ListCtrl, HyperlinkCtrl
 from location_wizard.dialogs import SelectTransformDialog
 
+from grass.grassdb.checks import location_exists
 from grass.script import decode
 from grass.script import core as grass
 from grass.exceptions import OpenError
@@ -71,7 +72,6 @@ global west
 global resolution
 global wizerror
 global translist
-
 
 class TitledPage(WizardPageSimple):
     """Class to make wizard pages. Generic methods to make labels,
@@ -87,9 +87,6 @@ class TitledPage(WizardPageSimple):
         self.title.SetFont(wx.Font(13, wx.SWISS, wx.NORMAL, wx.BOLD))
         # main sizers
         self.pagesizer = wx.BoxSizer(wx.VERTICAL)
-        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
-        self.sizer.SetCols(5)
-        self.sizer.SetRows(8)
 
     def DoLayout(self):
         """Do page layout"""
@@ -112,7 +109,7 @@ class TitledPage(WizardPageSimple):
         if not parent:
             parent = self
         label = StaticText(parent=parent, id=wx.ID_ANY, label=text,
-                              style=style)
+                           style=style)
         if tooltip:
             label.SetToolTip(tooltip)
         return label
@@ -123,7 +120,7 @@ class TitledPage(WizardPageSimple):
         if not parent:
             parent = self
         textCtrl = TextCtrl(parent=parent, id=wx.ID_ANY, value=text,
-                               size=size, style=style)
+                            size=size, style=style)
         if tooltip:
             textCtrl.SetToolTip(tooltip)
         return textCtrl
@@ -134,7 +131,7 @@ class TitledPage(WizardPageSimple):
         if not parent:
             parent = self
         button = Button(parent=parent, id=id, label=text,
-                           size=size)
+                        size=size)
         if tooltip:
             button.SetToolTip(tooltip)
         return button
@@ -145,10 +142,20 @@ class TitledPage(WizardPageSimple):
         if not parent:
             parent = self
         chbox = CheckBox(parent=parent, id=id, label=text,
-                            size=size)
+                         size=size)
         if tooltip:
             chbox.SetToolTip(tooltip)
         return chbox
+
+
+class GridBagSizerTitledPage(TitledPage):
+    """GridBagSizer declaration for TitledPage class"""
+    def __init__(self, parent, title):
+        super().__init__(parent, title)
+
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
 
 
 class DatabasePage(TitledPage):
@@ -158,32 +165,41 @@ class DatabasePage(TitledPage):
         TitledPage.__init__(self, wizard, _(
             "Define new GRASS Location"))
 
+        # grid definition
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
+
+        # definition of variables
         self.grassdatabase = grassdatabase
         self.location = ''
         self.locTitle = ''
-        
+
+        # browse button
         self.bbrowse = self.MakeButton(_("Change"))
 
         # text controls
-        self.tgisdbase = self.MakeLabel(grassdatabase)    
+        self.tgisdbase = self.MakeLabel(grassdatabase)
         self.tlocation = self.MakeTextCtrl("newLocation", size=(400, -1))
         self.tlocation.SetFocus()
+
+        checks = [(grass.legal_name, self._nameValidationFailed),
+                  (self._checkLocationNotExists, self._locationAlreadyExists)]
         self.tlocation.SetValidator(
-            GenericValidator(
-                grass.legal_name,
-                self._nameValidationFailed))
+            GenericMultiValidator(checks))
         self.tlocTitle = self.MakeTextCtrl(size=(400, -1))
-        
+
         # text for required options
         required_txt = self.MakeLabel("*")
         required_txt.SetForegroundColour(wx.RED)
         required_txt.SetToolTip(_("This option is required"))
-        
+
         # text for optional options
         optional_txt = self.MakeLabel(_("(optional)"))
         italics = wx.Font(10, wx.DEFAULT, wx.ITALIC, wx.NORMAL)
         optional_txt.SetFont(italics)
-        optional_txt.SetForegroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_GRAYTEXT))
+        optional_txt.SetForegroundColour(wx.SystemSettings.GetColour(
+                                         wx.SYS_COLOUR_GRAYTEXT))
 
         # layout
         self.sizer.Add(
@@ -226,7 +242,7 @@ class DatabasePage(TitledPage):
                        wx.ALIGN_CENTER_VERTICAL |
                        wx.ALL, border=5,
                        pos=(4, 2))
-        
+
         self.sizer.Add(self.MakeLabel(_("Location will be created in GRASS database:")),
                        flag=wx.ALIGN_LEFT |
                        wx.ALIGN_CENTER_VERTICAL |
@@ -251,15 +267,23 @@ class DatabasePage(TitledPage):
 
     def _nameValidationFailed(self, ctrl):
         message = _(
-            "Name <%(name)s> is not a valid name for location. "
-            "Please use only ASCII characters excluding %(chars)s "
-            "and space.") % {
-            'name': ctrl.GetValue(),
-            'chars': '/"\'@,=*~'}
-        GError(
-            parent=self,
-            message=message,
-            caption=_("Invalid location name"))
+            "Name '{}' is not a valid name for location. "
+            "Please use only ASCII characters excluding characters {} "
+            "and space.").format(ctrl.GetValue(), '/"\'@,=*~')
+        GError(parent=self, message=message, caption=_("Invalid name"))
+
+    def _checkLocationNotExists(self, text):
+        """Check whether user's input location exists or not."""
+        if location_exists(self.tgisdbase.GetLabel(), text):
+            return False
+        return True
+
+    def _locationAlreadyExists(self, ctrl):
+        message = _(
+            "Location '{}' already exists. Please consider using "
+            "another name for your location.").format(ctrl.GetValue())
+        GError(parent=self, message=message,
+               caption=_("Existing location path"))
 
     def OnChangeName(self, event):
         """Name for new location was changed"""
@@ -271,7 +295,7 @@ class DatabasePage(TitledPage):
             nextButton.Disable()
 
         event.Skip()
-        
+
     def OnBrowse(self, event):
         """Choose GRASS data directory"""
         dlg = wx.DirDialog(self, _("Choose GRASS data directory:"),
@@ -283,21 +307,6 @@ class DatabasePage(TitledPage):
         dlg.Destroy()
 
     def OnPageChanging(self, event=None):
-        error = None
-        if os.path.isdir(
-            os.path.join(
-                self.tgisdbase.GetLabel(),
-                self.tlocation.GetValue())):
-            error = _("Location already exists in GRASS Database.")
-
-        if error:
-            GError(parent=self,
-                   message="%s <%s>.%s%s" % (_("Unable to create location"),
-                                             str(self.tlocation.GetValue()),
-                                             os.linesep,
-                                             error))
-            event.Veto()
-            return
 
         self.location = self.tlocation.GetValue()
         self.grassdatabase = self.tgisdbase.GetLabel()
@@ -316,59 +325,58 @@ class CoordinateSystemPage(TitledPage):
 
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _(
-            "Choose method for creating a new location"))
+            "Select Coordinate Reference System (CRS)"))
+
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
 
         self.parent = parent
         global coordsys
 
         # toggles
         self.radioEpsg = wx.RadioButton(parent=self, id=wx.ID_ANY, label=_(
-            "Select EPSG code of spatial reference system"), style=wx.RB_GROUP)
-        #self.radioIau = wx.RadioButton(
+            "Select CRS from a list by EPSG or description"), style=wx.RB_GROUP)
+        # self.radioIau = wx.RadioButton(
         #    parent=self, id=wx.ID_ANY,
         #    label=_("Select IAU code of spatial reference system"))
         self.radioFile = wx.RadioButton(
             parent=self, id=wx.ID_ANY, label=_(
-                "Read projection and datum terms from a "
-                "georeferenced data file"))
+                "Read CRS from a georeferenced data file"))
+        self.radioXy = wx.RadioButton(parent=self, id=wx.ID_ANY, label=_(
+                "Create a generic cartesian coordinate system (XY)"))
         self.radioWkt = wx.RadioButton(
             parent=self, id=wx.ID_ANY, label=_(
-                "Read projection and datum terms from a "
-                "Well Known Text (WKT) .prj file"))
-        self.radioSrs = wx.RadioButton(parent=self, id=wx.ID_ANY, label=_(
-            "Select coordinate system parameters from a list"))
+                "Specify CRS using WKT string"))
         self.radioProj = wx.RadioButton(
             parent=self, id=wx.ID_ANY, label=_(
-                "Specify projection and datum terms using custom "
-                "PROJ.4 parameters"))
-        self.radioXy = wx.RadioButton(parent=self, id=wx.ID_ANY, label=_(
-            "Create a generic Cartesian coordinate system (XY)"))
+                "Specify CRS using PROJ.4 string"))
+        self.radioSrs = wx.RadioButton(parent=self, id=wx.ID_ANY, label=_(
+                "Define custom CRS"))
 
         # layout
         self.sizer.SetVGap(10)
-        self.sizer.Add(StaticText(parent=self, label=_("Simple methods:")),
-                       flag=wx.ALIGN_LEFT, pos=(1, 1))
         self.sizer.Add(self.radioEpsg,
-                       flag=wx.ALIGN_LEFT, pos=(2, 1))
-        #self.sizer.Add(self.radioIau,
+                       flag=wx.ALIGN_LEFT, pos=(1, 1))
+        # self.sizer.Add(self.radioIau,
         #               flag=wx.ALIGN_LEFT, pos=(1, 1))
         self.sizer.Add(self.radioFile,
-                       flag=wx.ALIGN_LEFT, pos=(3, 1))
-        self.sizer.Add(self.radioWkt,
-                       flag=wx.ALIGN_LEFT, pos=(4, 1))
+                       flag=wx.ALIGN_LEFT, pos=(2, 1))
         self.sizer.Add(self.radioXy,
+                       flag=wx.ALIGN_LEFT, pos=(3, 1))
+        self.sizer.Add(StaticText(parent=self, label=_("Additional methods:")),
+                       flag=wx.ALIGN_LEFT, pos=(4, 1))
+        self.sizer.Add(self.radioWkt,
                        flag=wx.ALIGN_LEFT, pos=(5, 1))
-        self.sizer.Add(StaticText(parent=self, label=_("Advanced methods:")),
+        self.sizer.Add(self.radioProj,
                        flag=wx.ALIGN_LEFT, pos=(6, 1))
         self.sizer.Add(self.radioSrs,
                        flag=wx.ALIGN_LEFT, pos=(7, 1))
-        self.sizer.Add(self.radioProj,
-                       flag=wx.ALIGN_LEFT, pos=(8, 1))
         self.sizer.AddGrowableCol(1)
 
         # bindings
         self.Bind(wx.EVT_RADIOBUTTON, self.SetVal, id=self.radioEpsg.GetId())
-        #self.Bind(wx.EVT_RADIOBUTTON, self.SetVal, id=self.radioIau.GetId())
+        # self.Bind(wx.EVT_RADIOBUTTON, self.SetVal, id=self.radioIau.GetId())
         self.Bind(wx.EVT_RADIOBUTTON, self.SetVal, id=self.radioFile.GetId())
         self.Bind(wx.EVT_RADIOBUTTON, self.SetVal, id=self.radioWkt.GetId())
         self.Bind(wx.EVT_RADIOBUTTON, self.SetVal, id=self.radioSrs.GetId())
@@ -387,7 +395,7 @@ class CoordinateSystemPage(TitledPage):
                 self.radioSrs.SetValue(True)
             if coordsys == "epsg":
                 self.radioEpsg.SetValue(True)
-            #if coordsys == "iau":
+            # if coordsys == "iau":
             #    self.radioIau.SetValue(True)
             if coordsys == "file":
                 self.radioFile.SetValue(True)
@@ -405,7 +413,7 @@ class CoordinateSystemPage(TitledPage):
             if coordsys == "epsg":
                 self.SetNext(self.parent.epsgpage)
                 self.parent.sumpage.SetPrev(self.parent.epsgpage)
-            #if coordsys == "iau":
+            # if coordsys == "iau":
             #    self.SetNext(self.parent.iaupage)
             #    self.parent.sumpage.SetPrev(self.parent.iaupage)
             if coordsys == "file":
@@ -431,7 +439,7 @@ class CoordinateSystemPage(TitledPage):
             coordsys = "proj"
             self.SetNext(self.parent.projpage)
             self.parent.sumpage.SetPrev(self.parent.datumpage)
-        #elif event.GetId() == self.radioIau.GetId():
+        # elif event.GetId() == self.radioIau.GetId():
         #    coordsys = "iau"
         #    self.SetNext(self.parent.iaupage)
         #    self.parent.sumpage.SetPrev(self.parent.iaupage)
@@ -458,10 +466,14 @@ class CoordinateSystemPage(TitledPage):
 
 
 class ProjectionsPage(TitledPage):
-    """Wizard page for selecting projection (select coordinate system option)"""
+    """Wizard page for defining custom CRS"""
 
     def __init__(self, wizard, parent):
-        TitledPage.__init__(self, wizard, _("Choose projection"))
+        TitledPage.__init__(self, wizard, _("Define custom CRS"))
+
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
 
         self.parent = parent
         self.proj = ''
@@ -550,7 +562,6 @@ class ProjectionsPage(TitledPage):
 
     def OnSearch(self, event):
         """Search projection by desc"""
-        str = event.GetString()
         try:
             self.proj, self.projdesc = self.projlist.Search(
                 index=[0, 1], pattern=event.GetString())
@@ -577,12 +588,12 @@ class ItemList(ListCtrl,
 
     def __init__(self, parent, columns, data=None):
         ListCtrl.__init__(self, parent=parent, id=wx.ID_ANY,
-                             style=wx.LC_REPORT |
-                             wx.LC_VIRTUAL |
-                             wx.LC_HRULES |
-                             wx.LC_VRULES |
-                             wx.LC_SINGLE_SEL |
-                             wx.LC_SORT_ASCENDING, size=(550, 125))
+                          style=wx.LC_REPORT |
+                          wx.LC_VIRTUAL |
+                          wx.LC_HRULES |
+                          wx.LC_VRULES |
+                          wx.LC_SINGLE_SEL |
+                          wx.LC_SORT_ASCENDING, size=(550, 125))
 
         # original data or None
         self.sourceData = data
@@ -594,13 +605,8 @@ class ItemList(ListCtrl,
         for column in columns:
             self.InsertColumn(i, column)
             i += 1
-        #
-        # add some attributes
-        #
-        self.attr1 = wx.ListItemAttr()
-        self.attr1.SetBackgroundColour(wx.Colour(238, 238, 238))
-        self.attr2 = wx.ListItemAttr()
-        self.attr2.SetBackgroundColour("white")
+
+        self.EnableAlternateRowColours()
 
         if self.sourceData:
             self.Populate()
@@ -631,13 +637,9 @@ class ItemList(ListCtrl,
         if self.sourceData:
             self.SortListItems(col=0, ascending=True)
 
-        #
-        # bindings
-        #
-        self.Bind(wx.EVT_LIST_COL_CLICK, self.OnColumnClick)
-
     def Populate(self, data=None, update=False):
-        """Populate list"""
+        """Populate and sort list.
+        Returns sorted list."""
         self.itemDataMap = {}
         self.itemIndexMap = []
 
@@ -664,26 +666,12 @@ class ItemList(ListCtrl,
             self.SetColumnWidth(1, 300)
 
             self.SendSizeEvent()
+            return data
 
         except Exception as e:
             wx.MessageBox(parent=self,
                           message=_("Unable to read list: %s") % e,
                           caption=_("Error"), style=wx.OK | wx.ICON_ERROR)
-
-    def OnColumnClick(self, event):
-        """Sort by column"""
-        self._col = event.GetColumn()
-
-        # remove duplicated arrow symbol from column header
-        # FIXME: should be done automatically
-        info = wx.ListItem()
-        info.m_mask = wx.LIST_MASK_TEXT | wx.LIST_MASK_IMAGE
-        info.m_image = -1
-        for column in range(self.GetColumnCount()):
-            info.m_text = self.GetColumn(column).GetText()
-            self.SetColumn(column, info)
-
-        event.Skip()
 
     def GetSortImages(self):
         """Used by the ColumnSorterMixin, see wx/lib/mixins/listctrl.py"""
@@ -698,29 +686,16 @@ class ItemList(ListCtrl,
     def OnGetItemImage(self, item):
         return -1
 
-    def OnGetItemAttr(self, item):
-        """Get item attributes"""
-        index = self.itemIndexMap[item]
-        if (index % 2) == 0:
-            return self.attr2
-        else:
-            return self.attr1
-
     def SortItems(self, sorter=cmp):
         """Sort items"""
         items = list(self.itemDataMap.keys())
-        if sys.version_info[0] >= 3:
-            # not sure what Sorter is needed for
-            items.sort()
-        else:
-            items.sort(self.Sorter)
+        items.sort(key=functools.cmp_to_key(self.Sorter))
         self.itemIndexMap = items
 
         # redraw the list
         self.Refresh()
 
     def Sorter(self, key1, key2):
-        colName = self.GetColumn(self._col).GetText()
         ascending = self._colSortFlag[self._col]
         # convert always string
         item1 = self.itemDataMap[key1][self._col]
@@ -745,13 +720,14 @@ class ItemList(ListCtrl,
         """Used by listmix.ColumnSorterMixin"""
         return self
 
-    def Search(self, index, pattern):
+    def Search(self, index, pattern, firstOnly=True):
         """Search projection by description
-        Return first found item or None
+        Return first found item (or None) if firstOnly is True,
+        all data (or empty list) if False
         """
         if pattern == '':
             self.Populate(self.sourceData)
-            return []
+            return None if firstOnly else []
 
         data = []
         pattern = pattern.lower()
@@ -766,11 +742,17 @@ class ItemList(ListCtrl,
                     # osgeo4w problem (should be fixed)
                     pass
 
-        self.Populate(data)
+        data = self.Populate(data)
         if len(data) > 0:
-            return data[0]
+            if firstOnly:
+                return data[0]
+            else:
+                return data
         else:
-            return []
+            if firstOnly:
+                return None
+            else:
+                return []
 
 
 class ProjParamsPage(TitledPage):
@@ -781,6 +763,10 @@ class ProjParamsPage(TitledPage):
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _("Choose projection parameters"))
         global coordsys
+
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
 
         self.parent = parent
         self.panel = None
@@ -989,6 +975,10 @@ class DatumPage(TitledPage):
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _("Specify geodetic datum"))
 
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
+
         self.parent = parent
         self.datum = ''
         self.datumdesc = ''
@@ -1058,7 +1048,8 @@ class DatumPage(TitledPage):
                 event.Veto()
             else:
                 # check for datum tranforms
-                #                proj4string = self.parent.CreateProj4String() + ' +datum=%s' % self.datum
+                #                proj4string = self.parent.CreateProj4String()
+                #                + ' +datum=%s' % self.datum
                 ret = RunCommand('g.proj',
                                  read=True,
                                  proj4='%s' % proj,
@@ -1149,7 +1140,6 @@ class DatumPage(TitledPage):
     def OnDatumSelected(self, event):
         """Datum selected"""
         index = event.GetIndex()
-        item = event.GetItem()
 
         self.datum = self.datumlist.GetItem(index, 0).GetText()
         self.tdatum.SetValue(self.datum)
@@ -1162,6 +1152,10 @@ class EllipsePage(TitledPage):
 
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _("Specify ellipsoid"))
+
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
 
         self.parent = parent
 
@@ -1308,7 +1302,6 @@ class EllipsePage(TitledPage):
     def OnItemSelected(self, event):
         """Ellipsoid selected"""
         index = event.GetIndex()
-        item = event.GetItem()
 
         self.ellipse = self.ellipselist.GetItem(index, 0).GetText()
         self.tellipse.SetValue(self.ellipse)
@@ -1336,8 +1329,13 @@ class GeoreferencedFilePage(TitledPage):
     for setting coordinate system parameters"""
 
     def __init__(self, wizard, parent):
-        TitledPage.__init__(self, wizard, _("Select georeferenced file"))
+        TitledPage.__init__(self, wizard, _("Read CRS from a georeferenced data file"))
 
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
+
+        # create variables
         self.georeffile = ''
 
         # create controls
@@ -1378,8 +1376,6 @@ class GeoreferencedFilePage(TitledPage):
             event.Veto()
         self.GetNext().SetPrev(self)
 
-        event.Skip()
-
     def OnText(self, event):
         """File changed"""
         self.georeffile = event.GetString()
@@ -1412,33 +1408,37 @@ class WKTPage(TitledPage):
 
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _(
-            "Select Well Known Text (WKT) .prj file"))
+            "Specify CRS using WKT string"))
 
-        self.wktfile = ''
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
 
-        # create controls
-        self.lfile = self.MakeLabel(_("WKT .prj file:"))
-        self.tfile = self.MakeTextCtrl(size=(300, -1))
-        self.bbrowse = self.MakeButton(_("Browse"))
+        self.wktstring = ''
+        self.parent = parent
 
-        # do layout
-        self.sizer.Add(self.lfile, flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTRE_VERTICAL |
-                       wx.ALL, border=5, pos=(1, 1))
-        self.sizer.Add(self.tfile, flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTRE_VERTICAL |
-                       wx.ALL, border=5, pos=(1, 2))
-        self.sizer.Add(self.bbrowse, flag=wx.ALIGN_LEFT |
-                       wx.ALL, border=5, pos=(1, 3))
-        self.sizer.AddGrowableCol(3)
+        # widgets
+        self.text_wkt = self.MakeTextCtrl(size=(400, 200),
+                                          style=wx.TE_MULTILINE)
+        self.label_wkt = self.MakeLabel(
+            _("Enter WKT parameters string:"))
 
-        self.bbrowse.Bind(wx.EVT_BUTTON, self.OnBrowse)
-        self.tfile.Bind(wx.EVT_TEXT, self.OnText)
+        # layout
+        self.sizer.Add(self.label_wkt,
+                       flag=wx.ALIGN_LEFT | wx.ALL,
+                       border=5, pos=(1, 1))
+        self.sizer.Add(self.text_wkt,
+                       flag=wx.ALIGN_LEFT | wx.ALL | wx.EXPAND,
+                       border=5, pos=(2, 1), span=(1, 2))
+        self.sizer.AddGrowableRow(2)
+        self.sizer.AddGrowableCol(2)
+
+        self.text_wkt.Bind(wx.EVT_TEXT, self.OnText)
         self.Bind(wiz.EVT_WIZARD_PAGE_CHANGING, self.OnPageChanging)
         self.Bind(wiz.EVT_WIZARD_PAGE_CHANGED, self.OnEnterPage)
 
     def OnEnterPage(self, event):
-        if len(self.wktfile) == 0:
+        if len(self.wktstring) == 0:
             # disable 'next' button by default
             wx.FindWindowById(wx.ID_FORWARD).Enable(False)
         else:
@@ -1447,40 +1447,21 @@ class WKTPage(TitledPage):
         event.Skip()
 
     def OnPageChanging(self, event):
-        if event.GetDirection() and not os.path.isfile(self.wktfile):
+        if event.GetDirection() and not self.wktstring.strip():
             event.Veto()
         self.GetNext().SetPrev(self)
 
-        event.Skip()
-
     def OnText(self, event):
-        """File changed"""
-        self.wktfile = event.GetString()
+        """Change WKT string"""
+        # TODO: check WKT syntax
+        self.wktstring = event.GetString()
         nextButton = wx.FindWindowById(wx.ID_FORWARD)
-        if len(self.wktfile) > 0 and os.path.isfile(self.wktfile):
-            if not nextButton.IsEnabled():
-                nextButton.Enable(True)
-        else:
+        if len(self.wktstring) == 0:
             if nextButton.IsEnabled():
                 nextButton.Enable(False)
-
-        event.Skip()
-
-    def OnBrowse(self, event):
-        """Choose file"""
-        dlg = wx.FileDialog(
-            parent=self,
-            message=_("Select Well Known Text (WKT) .prj file"),
-            defaultDir=os.getcwd(),
-            wildcard="PRJ files (*.prj)|*.prj|Files (*.*)|*.*",
-            style=wx.FD_OPEN)
-
-        if dlg.ShowModal() == wx.ID_OK:
-            path = dlg.GetPath()
-            self.tfile.SetValue(path)
-        dlg.Destroy()
-
-        event.Skip()
+        else:
+            if not nextButton.IsEnabled():
+                nextButton.Enable()
 
 
 class EPSGPage(TitledPage):
@@ -1488,7 +1469,14 @@ class EPSGPage(TitledPage):
     setting coordinate system parameters"""
 
     def __init__(self, wizard, parent):
-        TitledPage.__init__(self, wizard, _("Choose EPSG Code"))
+        TitledPage.__init__(self, wizard, _("Select CRS from a list"))
+
+        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        searchBoxSizer = wx.BoxSizer(wx.HORIZONTAL)
+        epsglistBoxSizer = wx.BoxSizer(wx.HORIZONTAL)
+        informationBoxSizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        # definition of variables
         self.parent = parent
         self.epsgCodeDict = {}
         self.epsgcode = None
@@ -1496,25 +1484,16 @@ class EPSGPage(TitledPage):
         self.epsgparams = ''
 
         # labels
-        self.lfile = self.MakeLabel(
-            _("Path to the EPSG-codes file:"),
-            style=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
         self.lcode = self.MakeLabel(
-            _("EPSG code:"),
+            _("Filter by EPSG code or description:"),
             style=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
-        # text input
-        epsgdir = utils.PathJoin(os.environ["GRASS_PROJSHARE"], 'epsg')
-        self.tfile = self.MakeTextCtrl(text=epsgdir, size=(200, -1),
-                                       style=wx.TE_PROCESS_ENTER)
-        self.tcode = self.MakeTextCtrl(size=(200, -1))
-
-        # buttons
-        self.bbrowse = self.MakeButton(_("Browse"))
+        self.llink = self.MakeLabel(
+            _("Find more information at:"),
+            style=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
 
         # search box
-        self.searchb = SearchCtrl(self, size=(200, -1),
+        self.searchb = SearchCtrl(self, size=(-1, 30),
                                   style=wx.TE_PROCESS_ENTER)
-
         self.epsglist = ItemList(
             self,
             data=None,
@@ -1523,44 +1502,42 @@ class EPSGPage(TitledPage):
                 _('Description'),
                 _('Parameters')])
 
-        # layout
-        self.sizer.Add(self.lfile,
-                       flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTER_VERTICAL |
-                       wx.ALL, border=5, pos=(1, 1), span=(1, 2))
-        self.sizer.Add(self.tfile,
-                       flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTER_VERTICAL |
-                       wx.ALL, border=5, pos=(1, 3))
-        self.sizer.Add(self.bbrowse,
-                       flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTER_VERTICAL |
-                       wx.ALL, border=5, pos=(1, 4))
-        self.sizer.Add(self.lcode,
-                       flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTER_VERTICAL |
-                       wx.ALL, border=5, pos=(2, 1), span=(1, 2))
-        self.sizer.Add(self.tcode,
-                       flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTER_VERTICAL |
-                       wx.ALL, border=5, pos=(2, 3))
-        self.sizer.Add(self.searchb,
-                       flag=wx.ALIGN_LEFT |
-                       wx.ALIGN_CENTER_VERTICAL |
-                       wx.ALL, border=5, pos=(3, 3))
+        # epsg.io hyperlink
+        self.tlink = HyperlinkCtrl(
+            self, id=wx.ID_ANY,
+            label="epsg.io",
+            url="https://epsg.io/")
+        self.tlink.SetNormalColour(
+            wx.SystemSettings.GetColour(
+                wx.SYS_COLOUR_GRAYTEXT))
+        self.tlink.SetVisitedColour(
+            wx.SystemSettings.GetColour(
+                wx.SYS_COLOUR_GRAYTEXT))
 
-        self.sizer.Add(self.epsglist,
-                       flag=wx.ALIGN_LEFT | wx.EXPAND, pos=(4, 1),
-                       span=(1, 4))
-        self.sizer.AddGrowableCol(3)
-        self.sizer.AddGrowableRow(4)
+        # layout
+        searchBoxSizer.Add(self.lcode, proportion=0,
+                           flag=wx.ALIGN_CENTER_VERTICAL |
+                           wx.ALL, border=5)
+        searchBoxSizer.Add(self.searchb, proportion=1,
+                           flag=wx.ALL |
+                           wx.EXPAND, border=5)
+        epsglistBoxSizer.Add(self.epsglist, proportion=1,
+                             flag=wx.ALL |
+                             wx.EXPAND, border=5)
+        informationBoxSizer.AddStretchSpacer(1)
+        informationBoxSizer.Add(self.llink, proportion=0,
+                                flag=wx.ALIGN_CENTER_VERTICAL |
+                                wx.RIGHT, border=5)
+        informationBoxSizer.Add(self.tlink, proportion=0,
+                                flag=wx.ALIGN_CENTER_VERTICAL)
+        self.sizer.Add(searchBoxSizer, proportion=0, flag=wx.EXPAND)
+        self.sizer.Add(epsglistBoxSizer, proportion=1, flag=wx.EXPAND)
+        self.sizer.Add(informationBoxSizer, proportion=0,
+                       flag=wx.EXPAND | wx.TOP, border=5)
 
         # events
-        self.bbrowse.Bind(wx.EVT_BUTTON, self.OnBrowse)
-        self.tfile.Bind(wx.EVT_TEXT_ENTER, self.OnBrowseCodes)
-        self.tcode.Bind(wx.EVT_TEXT, self.OnText)
+        self.searchb.Bind(wx.EVT_TEXT, self.OnTextChange)
         self.epsglist.Bind(wx.EVT_LIST_ITEM_SELECTED, self.OnItemSelected)
-        self.searchb.Bind(wx.EVT_TEXT_ENTER, self.OnSearch)
         self.Bind(wiz.EVT_WIZARD_PAGE_CHANGING, self.OnPageChanging)
         self.Bind(wiz.EVT_WIZARD_PAGE_CHANGED, self.OnEnterPage)
 
@@ -1569,12 +1546,11 @@ class EPSGPage(TitledPage):
         if event.GetDirection():
             if not self.epsgcode:
                 # disable 'next' button by default
-                wx.FindWindowById(wx.ID_FORWARD).Enable(False)
+                self.EnableNext(False)
+                # load default epsg database file
+                self.OnBrowseCodes(None)
             else:
-                wx.FindWindowById(wx.ID_FORWARD).Enable(True)
-
-        # load default epsg database file
-        self.OnBrowseCodes(None)
+                self.EnableNext(True)
 
         event.Skip()
 
@@ -1611,78 +1587,52 @@ class EPSGPage(TitledPage):
                     self.parent.datum_trans = dtrans
             self.GetNext().SetPrev(self)
 
-    def OnText(self, event):
-        self.epsgcode = event.GetString()
-        try:
-            self.epsgcode = int(self.epsgcode)
-        except:
-            self.epsgcode = None
-
+    def EnableNext(self, enable=True):
         nextButton = wx.FindWindowById(wx.ID_FORWARD)
+        nextButton.Enable(enable)
 
-        if self.epsgcode and self.epsgCodeDict and \
-                self.epsgcode in self.epsgCodeDict.keys():
-            self.epsgdesc = self.epsgCodeDict[self.epsgcode][0]
-            self.epsgparams = self.epsgCodeDict[self.epsgcode][1]
-            if not nextButton.IsEnabled():
-                nextButton.Enable(True)
-        else:
-            self.epsgcode = None  # not found
-            if nextButton.IsEnabled():
-                nextButton.Enable(False)
-            self.epsgdesc = self.epsgparams = ''
-
-    def OnSearch(self, event):
+    def OnTextChange(self, event):
         value = self.searchb.GetValue()
-
         if value == '':
+            self.tlink.SetURL(str("https://epsg.io/"))
             self.epsgcode = None
             self.epsgdesc = self.epsgparams = ''
-            self.tcode.SetValue('')
-            self.searchb.SetValue('')
             self.OnBrowseCodes(None)
+            self.EnableNext(False)
         else:
-            try:
-                self.epsgcode, self.epsgdesc, self.epsgparams = \
-                    self.epsglist.Search(index=[0, 1, 2], pattern=value)
-            except (IndexError, ValueError):  # -> no item found
+            self.tlink.SetURL(str("https://epsg.io/?q={0}".format(value)))
+            data = self.epsglist.Search(index=[0, 1, 2], pattern=value,
+                                        firstOnly=False)
+            if data:
+                index = 0
+                # search for the exact epsg code match
+                # otherwise just select first item
+                try:
+                    epsg = int(value)
+                    for i, (code, desc, params) in enumerate(data):
+                        if code == epsg:
+                            index = i
+                            break
+                except ValueError:
+                    pass
+                self.epsgcode, self.epsgdesc, self.epsgparams = data[index]
+                self.epsglist.Select(index)
+                self.epsglist.Focus(index)
+                self.EnableNext()
+            else:
                 self.epsgcode = None
                 self.epsgdesc = self.epsgparams = ''
-                self.tcode.SetValue('')
-
-        event.Skip()
-
-    def OnBrowse(self, event):
-        """Define path for EPSG code file"""
-        path = os.path.dirname(self.tfile.GetValue())
-        if not path:
-            path = os.getcwd()
-
-        dlg = wx.FileDialog(
-            parent=self,
-            message=_("Choose EPSG codes file"),
-            defaultDir=path,
-            defaultFile="",
-            wildcard="*",
-            style=wx.FD_OPEN)
-
-        if dlg.ShowModal() == wx.ID_OK:
-            path = dlg.GetPath()
-            self.tfile.SetValue(path)
-            self.OnBrowseCodes(None)
-
-        dlg.Destroy()
+                self.EnableNext(False)
 
         event.Skip()
 
     def OnItemSelected(self, event):
         """EPSG code selected from the list"""
         index = event.GetIndex()
-        item = event.GetItem()
 
         self.epsgcode = int(self.epsglist.GetItem(index, 0).GetText())
         self.epsgdesc = self.epsglist.GetItem(index, 1).GetText()
-        self.tcode.SetValue(str(self.epsgcode))
+        self.EnableNext(True)
 
         event.Skip()
 
@@ -1712,6 +1662,13 @@ class IAUPage(TitledPage):
 
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _("Choose IAU Code"))
+
+        # grid definition
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
+
+        # definition of variables
         self.parent = parent
         self.epsgCodeDict = {}
         self.epsgcode = None
@@ -1725,6 +1682,7 @@ class IAUPage(TitledPage):
         self.lcode = self.MakeLabel(
             _("IAU code:"),
             style=wx.ALIGN_LEFT | wx.ALIGN_CENTER_VERTICAL)
+
         # text input
         epsgdir = utils.PathJoin(
             globalvar.ETCDIR,
@@ -1922,7 +1880,6 @@ class IAUPage(TitledPage):
     def OnItemSelected(self, event):
         """IAU code selected from the list"""
         index = event.GetIndex()
-        item = event.GetItem()
 
         self.epsgcode = int(self.epsglist.GetItem(index, 0).GetText())
         # This is here that the index 2 (aka WKT) should be loaded in a
@@ -1959,8 +1916,15 @@ class CustomPage(TitledPage):
     def __init__(self, wizard, parent):
         TitledPage.__init__(
             self, wizard,
-            _("Choose method of specifying georeferencing parameters"))
+            _("Specify CRS using PROJ.4 string"))
         global coordsys
+
+        # grid definition
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
+
+        # definition of variables
         self.customstring = ''
         self.parent = parent
 
@@ -2069,8 +2033,16 @@ class SummaryPage(TitledPage):
 
     def __init__(self, wizard, parent):
         TitledPage.__init__(self, wizard, _("Summary"))
+
+        # grid definition
+        self.sizer = wx.GridBagSizer(vgap=0, hgap=0)
+        self.sizer.SetCols(5)
+        self.sizer.SetRows(8)
+
+        # definition of variables
         self.parent = parent
 
+        # panels
         self.panelTitle = scrolled.ScrolledPanel(parent=self, id=wx.ID_ANY)
         self.panelProj4string = scrolled.ScrolledPanel(
             parent=self, id=wx.ID_ANY)
@@ -2107,7 +2079,7 @@ class SummaryPage(TitledPage):
         self.panelProj4string.SetSizer(proj4stringSizer)
 
         self.panelProj4string.SetupScrolling()
-        self.panelProj.SetupScrolling(scroll_y=False)
+        self.panelProj.SetupScrolling()
         self.panelTitle.SetupScrolling(scroll_y=False)
 
         self.sizer.Add(self.MakeLabel(_("GRASS Database:")),
@@ -2146,7 +2118,6 @@ class SummaryPage(TitledPage):
                        flag=wx.ALIGN_LEFT | wx.ALL | wx.EXPAND,
                        border=0, pos=(5, 1))
         self.sizer.AddGrowableCol(1)
-        self.sizer.AddGrowableRow(3, 1)
         self.sizer.AddGrowableRow(4, 1)
         self.sizer.AddGrowableRow(5, 5)
 
@@ -2171,7 +2142,6 @@ class SummaryPage(TitledPage):
             extra_opts['read'] = True
 
             if coordsys == 'proj':
-                addl_opts = {}
                 if len(datum) > 0:
                     extra_opts['datum'] = '%s' % datum
                     extra_opts['datum_trans'] = dtrans
@@ -2181,7 +2151,6 @@ class SummaryPage(TitledPage):
                                                  proj4=proj4string,
                                                  **extra_opts)
             elif coordsys == 'iau':
-                addl_opts = {}
                 if len(datum) > 0:
                     extra_opts['datum'] = '%s' % datum
                     extra_opts['datum_trans'] = dtrans
@@ -2202,7 +2171,8 @@ class SummaryPage(TitledPage):
                     georef=self.parent.filepage.georeffile, **extra_opts)
             elif coordsys == 'wkt':
                 ret, projlabel, err = RunCommand(
-                    'g.proj', flags='jft', wkt=self.parent.wktpage.wktfile, **extra_opts)
+                    'g.proj', flags='jft', wkt="-",
+                    stdin=self.parent.wktpage.wktstring, **extra_opts)
 
             finishButton = wx.FindWindowById(wx.ID_FORWARD)
             if ret == 0:
@@ -2235,7 +2205,7 @@ class SummaryPage(TitledPage):
             label = 'matches file %s' % self.parent.filepage.georeffile
 
         elif coordsys == 'wkt':
-            label = 'matches file %s' % self.parent.wktpage.wktfile
+            label = 'matches WKT string %s' % self.parent.wktpage.wktstring
 
         elif coordsys == 'proj':
             label = ('%s, %s %s' % (projdesc, datumdesc, ellipsedesc))
@@ -2284,13 +2254,6 @@ class LocationWizard(wx.Object):
         self.parent = parent
 
         #
-        # define wizard image
-        #
-        imagePath = os.path.join(globalvar.IMGDIR, "loc_wizard_qgis.png")
-        wizbmp = wx.Image(imagePath, wx.BITMAP_TYPE_PNG)
-        wizbmp = wizbmp.ConvertToBitmap()
-
-        #
         # get georeferencing information from tables in $GISBASE/etc
         #
         self.__readData()
@@ -2314,8 +2277,7 @@ class LocationWizard(wx.Object):
         self.wizard = WizardWithHelpButton(
             parent,
             id=wx.ID_ANY,
-            title=_("Define new GRASS Location"),
-            bitmap=wizbmp)
+            title=_("Define new GRASS Location"))
         self.wizard.Bind(wiz.EVT_WIZARD_HELP, self.OnHelp)
 
         self.startpage = DatabasePage(self.wizard, self, grassdatabase)
@@ -2390,7 +2352,6 @@ class LocationWizard(wx.Object):
 
         # new location created?
         self.location = None
-        success = False
 
         # location created in different GIS database?
         self.altdb = False
@@ -2418,9 +2379,6 @@ class LocationWizard(wx.Object):
                         'err': msg})
         else:  # -> canceled
             self.wizard.Destroy()
-            GMessage(parent=self.parent,
-                     message=_("Location wizard canceled. "
-                               "Location not created."))
 
         self.__cleanUp()
 
@@ -2440,7 +2398,6 @@ class LocationWizard(wx.Object):
         east = None
         west = None
         resolution = None
-        transformlist = list()
 
     def __readData(self):
         """Get georeferencing information from tables in $GISBASE/etc/proj"""
@@ -2566,26 +2523,11 @@ class LocationWizard(wx.Object):
                 try:
                     os.mkdir(database)
                 except OSError as error:
-                    GError(parent=self.wizard, message="%s <%s>" %
+                    GError(parent=self.wizard,
+                           message="%s <%s>" %
                            (_("Unable to create new GRASS Database"),
-                           database))
+                            database))
                     return None
-
-            # change to new GISDbase directory
-            RunCommand('g.gisenv',
-                       parent=self.wizard,
-                       set='GISDBASE=%s' % database)
-
-            wx.MessageBox(
-                parent=self.wizard,
-                message=_(
-                    "Location <%(loc)s> will be created "
-                    "in GIS data directory <%(dir)s>. "
-                    "You will need to change the default GIS "
-                    "data directory in the GRASS startup screen.") %
-                {'loc': location, 'dir': database},
-                caption=_("New GIS data directory"),
-                style=wx.OK | wx.ICON_INFORMATION | wx.CENTRE)
 
             # location created in alternate GISDbase
             self.altdb = True
@@ -2643,13 +2585,12 @@ class LocationWizard(wx.Object):
                                       filename=self.filepage.georeffile,
                                       desc=self.startpage.locTitle)
             elif coordsys == "wkt":
-                if not self.wktpage.wktfile or \
-                        not os.path.isfile(self.wktpage.wktfile):
-                    return _("File <%s> not found." % self.wktpage.wktfile)
+                if not self.wktpage.wktstring:
+                    return _('WKT string missing.')
 
                 grass.create_location(dbase=self.startpage.grassdatabase,
                                       location=self.startpage.location,
-                                      wkt=self.wktpage.wktfile,
+                                      wkt=self.wktpage.wktstring,
                                       desc=self.startpage.locTitle)
 
         except grass.ScriptError as e:
@@ -2659,19 +2600,11 @@ class LocationWizard(wx.Object):
 
     def CreateProj4String(self):
         """Constract PROJ.4 string"""
-        location = self.startpage.location
         proj = self.projpage.p4proj
-        projdesc = self.projpage.projdesc
         proj4params = self.paramspage.p4projparams
 
-#        datum = self.datumpage.datum
-        if self.datumpage.datumdesc:
-            datumdesc = self.datumpage.datumdesc + ' - ' + self.datumpage.ellipse
-        else:
-            datumdesc = ''
         datumparams = self.datumpage.datumparams
         ellipse = self.ellipsepage.ellipse
-        ellipsedesc = self.ellipsepage.ellipsedesc
         ellipseparams = self.ellipsepage.ellipseparams
 
         #
@@ -2707,13 +2640,13 @@ class LocationWizard(wx.Object):
 
 class WizardWithHelpButton(Wizard):
 
-    def __init__(self, parent, id, title, bitmap):
+    def __init__(self, parent, id, title):
         if globalvar.wxPythonPhoenix:
             Wizard.__init__(self)
             self.SetExtraStyle(wx.adv.WIZARD_EX_HELPBUTTON)
-            self.Create(parent=parent, id=id, title=title, bitmap=bitmap)
+            self.Create(parent=parent, id=id, title=title)
         else:
             pre = wiz.PreWizard()
             pre.SetExtraStyle(wx.wizard.WIZARD_EX_HELPBUTTON)
-            pre.Create(parent=parent, id=id, title=title, bitmap=bitmap)
+            pre.Create(parent=parent, id=id, title=title)
             self.PostCreate(pre)

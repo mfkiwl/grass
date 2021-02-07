@@ -47,12 +47,12 @@ static double distance_euclidean_squared(double dx, double dy)
 
 static double distance_maximum(double dx, double dy)
 {
-    return MAX(abs(dx), abs(dy));
+    return MAX(fabs(dx), fabs(dy));
 }
 
 static double distance_manhattan(double dx, double dy)
 {
-    return abs(dx) + abs(dy);
+    return fabs(dx) + fabs(dy);
 }
 
 static double geodesic_distance(int x1, int y1, int x2, int y2)
@@ -151,7 +151,7 @@ int main(int argc, char **argv)
     G_add_keyword(_("distance"));
     G_add_keyword(_("proximity"));
     module->description =
-	_("Generates a raster map containing distances to nearest raster features.");
+	_("Generates a raster map containing distances to nearest raster features and/or the value of the nearest non-null cell.");
 
     opt.in = G_define_standard_option(G_OPT_R_INPUT);
 

@@ -26,7 +26,7 @@ import wx
 import tempfile
 from multiprocessing import Process, Queue
 
-from core.gcmd import RunCommand, GException, DecodeString
+from core.gcmd import GException, DecodeString
 from core.settings import UserSettings
 from core.debug import Debug
 from core.utils import autoCropImageFromFile
@@ -695,7 +695,7 @@ class DictRefCounter:
     def Clear(self):
         """Clears items which are not needed any more."""
         Debug.msg(4, 'DictRefCounter.Clear')
-        for key in self.dictionary.keys():
+        for key in self.dictionary.copy().keys():
             if key is not None:
                 if self.referenceCount[key] <= 0:
                     del self.dictionary[key]

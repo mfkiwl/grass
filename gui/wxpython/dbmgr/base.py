@@ -115,11 +115,7 @@ class VirtualAttributeList(ListCtrl,
                    message=e.value)
             return
 
-        # add some attributes (colourful background for each item rows)
-        self.attr1 = wx.ListItemAttr()
-        self.attr1.SetBackgroundColour(wx.Colour(238, 238, 238))
-        self.attr2 = wx.ListItemAttr()
-        self.attr2.SetBackgroundColour("white")
+        self.EnableAlternateRowColours()
         self.il = wx.ImageList(16, 16)
         self.sm_up = self.il.Add(
             wx.ArtProvider.GetBitmap(
@@ -291,12 +287,24 @@ class VirtualAttributeList(ListCtrl,
 
             record = record.split(fs)
             if len(columns) != len(record):
-                GError(parent=self,
-                       message=_("Inconsistent number of columns "
-                                 "in the table <%(table)s>.") %
-                       {'table': tableName})
+                # Assuming there will be always at least one.
+                last = record[-1]
+                show_max = 3
+                if len(record) > show_max:
+                    record = record[:show_max]
+                # TODO: The real fix here is to use JSON output from v.db.select or
+                # proper CSV output and real CSV reader here (Python csv and json packages).
+                raise GException(
+                    _(
+                        "Unable to read the table <{table}> from the database due"
+                        " to seemingly inconsistent number of columns in the data transfer."
+                        " Check row: {row}..."
+                        " Likely, a newline character is present in the attribute value starting with: '{value}'"
+                        " Use the v.db.select module to investigate."
+                    ).format(table=tableName, row=" | ".join(record), value=last)
+                )
                 self.columns = {}  # because of IsEmpty method
-                return
+                return None
 
             self.AddDataRow(i, record, columns, keyId)
 
@@ -435,13 +443,6 @@ class VirtualAttributeList(ListCtrl,
         index = self.itemIndexMap[item]
         s = self.itemDataMap[index][col]
         return str(s)
-
-    def OnGetItemAttr(self, item):
-        """Get item attributes"""
-        if (item % 2) == 0:
-            return self.attr2
-        else:
-            return self.attr1
 
     def OnColumnMenu(self, event):
         """Column heading right mouse button -> pop-up menu"""
@@ -1150,7 +1151,7 @@ class DbMgrBrowsePage(DbMgrNotebookBase):
 
         label = _("Table")
         if not self.dbMgrData['editable']:
-            label += _(" (readonly)")
+            label += _(" (read-only)")
 
         if pos == -1:
             pos = self.GetPageCount()
@@ -1184,7 +1185,7 @@ class DbMgrBrowsePage(DbMgrNotebookBase):
 
         # sql statement box
         FNPageStyle = FN.FNB_NO_NAV_BUTTONS | \
-            FN.FNB_NO_X_BUTTON
+            FN.FNB_NO_X_BUTTON | FN.FNB_NODRAG | FN.FNB_FANCY_TABS
         if globalvar.hasAgw:
             dbmStyle = {'agwStyle': FNPageStyle}
         else:
@@ -2273,7 +2274,7 @@ class DbMgrTablesPage(DbMgrNotebookBase):
         self.layerPage[layer]['tablePage'] = panel.GetId()
         label = _("Table")
         if not self.dbMgrData['editable']:
-            label += _(" (readonly)")
+            label += _(" (read-only)")
 
         if pos == -1:
             pos = self.GetPageCount()
@@ -3815,7 +3816,7 @@ class FieldStatistics(wx.Frame):
         btnSizer = wx.BoxSizer(wx.HORIZONTAL)
 
         txtSizer.Add(self.text, proportion=1, flag=wx.EXPAND |
-                     wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
+                     wx.ALL, border=5)
 
         self.sp.SetSizer(txtSizer)
         self.sp.SetAutoLayout(True)
@@ -3827,13 +3828,13 @@ class FieldStatistics(wx.Frame):
         line = wx.StaticLine(parent=self.panel, id=wx.ID_ANY,
                              size=(20, -1), style=wx.LI_HORIZONTAL)
         sizer.Add(line, proportion=0, flag=wx.GROW |
-                  wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, border=3)
+                  wx.LEFT | wx.RIGHT, border=3)
 
         # buttons
         btnSizer.Add(self.btnClipboard, proportion=0,
-                     flag=wx.ALIGN_LEFT | wx.ALL, border=5)
+                     flag=wx.ALL, border=5)
         btnSizer.Add(self.btnCancel, proportion=0,
-                     flag=wx.ALIGN_RIGHT | wx.ALL, border=5)
+                     flag=wx.ALL, border=5)
         sizer.Add(
             btnSizer,
             proportion=0,

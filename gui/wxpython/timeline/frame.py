@@ -8,15 +8,14 @@ Classes:
  - frame::TimelineFrame
  - frame::LookUp
 
-(C) 2012-2016 by the GRASS Development Team
+(C) 2012-2020 by the GRASS Development Team
 
 This program is free software under the GNU General Public License
 (>=v2). Read the file COPYING that comes with GRASS for details.
 
 @author Anna Kratochvilova <kratochanna gmail.com>
 """
-import os
-import signal
+
 import six
 from math import ceil
 from itertools import cycle
@@ -35,10 +34,9 @@ try:
         FigureCanvasWxAgg as FigCanvas, \
         NavigationToolbar2WxAgg as NavigationToolbar
     import matplotlib.dates as mdates
-    from matplotlib import cbook
 except ImportError as e:
     raise ImportError(_('The Timeline Tool needs the "matplotlib" '
-                        '(python-matplotlib) package to be installed. {0}').format(e))
+                        '(python-matplotlib and on some systems also python-matplotlib-wx) package(s) to be installed. {0}').format(e))
 
 import grass.script as grass
 
@@ -70,12 +68,12 @@ def check_version(*version):
 class TimelineFrame(wx.Frame):
     """The main frame of the application"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, title=_("Timeline Tool")):
         wx.Frame.__init__(
             self,
             parent,
             id=wx.ID_ANY,
-            title=_("GRASS GIS Timeline Tool"))
+            title=title)
 
         tgis.init(True)
         self.datasets = []
@@ -397,8 +395,8 @@ class TimelineFrame(wx.Frame):
             datasets = self._checkDatasets(datasets)
             if not datasets:
                 return
-        except GException as e:
-            GError(parent=self, message=unicode(e), showTraceback=False)
+        except GException as error:
+            GError(parent=self, message=str(error), showTraceback=False)
             return
 
         self.datasets = datasets
@@ -421,7 +419,7 @@ class TimelineFrame(wx.Frame):
                 if not self.axes3d:
                     # do not remove this import - unused but it is required for
                     # 3D
-                    from mpl_toolkits.mplot3d import Axes3D  # pylint: disable=W0611
+                    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
                     self.axes3d = self.fig.add_subplot(
                         2, 1, 2, projection='3d')
 
@@ -509,8 +507,8 @@ class TimelineFrame(wx.Frame):
             datasets = self._checkDatasets(datasets)
             if not datasets:
                 return
-        except GException as e:
-            GError(parent=self, message=unicode(e), showTraceback=False)
+        except GException as error:
+            GError(parent=self, message=str(error), showTraceback=False)
             return
         self.datasets = datasets
         self.datasetSelect.SetValue(
@@ -615,7 +613,7 @@ class DataCursor(object):
         self.formatFunction = formatFunction
         self.offsets = offsets
         self.display_all = display_all
-        if not cbook.iterable(artists):
+        if not np.iterable(artists):
             artists = [artists]
         self.artists = artists
 
@@ -626,7 +624,7 @@ class DataCursor(object):
         for ax in self.axes:
             self.annotations[ax] = self.annotate(ax)
         for artist in self.artists:
-            artist.set_picker(tolerance)
+            artist.set_pickradius(tolerance)
         for fig in self.figures:
             fig.canvas.mpl_connect('pick_event', self)
             fig.canvas.mpl_connect('key_press_event', self.keyPressed)

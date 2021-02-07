@@ -147,6 +147,8 @@ class VectorSelectBase():
         """Delete row in widget
         """
         index = self.slist.GetFocusedItem()
+        if index < 0:
+            return
         category = self.slist.GetItemText(index)
         for item in self.selectedFeatures:
             if int(item['Category']) == int(category):
@@ -269,10 +271,15 @@ class VectorSelectBase():
             return None
 
         if layerSelected:
-            mapName = str(layerSelected)
-            if self.mapName is not None:
-                if self.mapName != mapName:
-                    self.Reset()
+            if layerSelected.type != 'vector':
+                mapName = None
+                self.UnregisterMapEvtHandler()
+                GError(_("No vector map layer selected. Operation canceled."))
+            else:
+                mapName = str(layerSelected)
+                if self.mapName is not None:
+                    if self.mapName != mapName:
+                        self.Reset()
         else:
             mapName = None
             self.UnregisterMapEvtHandler()

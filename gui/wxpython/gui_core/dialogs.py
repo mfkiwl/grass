@@ -29,14 +29,13 @@ This program is free software under the GNU General Public License
 """
 
 import os
-import sys
 import re
 import six
 
 import wx
 
 from grass.script import core as grass
-from grass.script.utils import natural_sort, try_remove
+from grass.script.utils import naturally_sorted, try_remove
 
 from grass.pydispatch.signal import Signal
 
@@ -44,10 +43,11 @@ from core import globalvar
 from core.gcmd import GError, RunCommand, GMessage
 from gui_core.gselect import LocationSelect, MapsetSelect, Select, \
     OgrTypeSelect, SubGroupSelect
-from gui_core.widgets import SingleSymbolPanel, GListCtrl, SimpleValidator, \
+from gui_core.widgets import SingleSymbolPanel, SimpleValidator, \
     MapValidator
 from core.settings import UserSettings
 from core.debug import Debug
+from core.utils import is_shell_running
 from gui_core.wrap import Button, CheckListBox, EmptyBitmap, HyperlinkCtrl, \
     Menu, NewId, SpinCtrl, StaticBox, StaticText, TextCtrl
 
@@ -368,8 +368,7 @@ class NewVectorDialog(VectorDialog):
                 proportion=0,
                 flag=wx.ALIGN_CENTER_VERTICAL)
             keySizer.AddSpacer(10)
-            keySizer.Add(self.keycol, proportion=0,
-                         flag=wx.ALIGN_RIGHT)
+            keySizer.Add(self.keycol, proportion=0)
             self.dataSizer.Add(keySizer, proportion=1,
                                flag=wx.EXPAND | wx.ALL, border=1)
 
@@ -1562,7 +1561,7 @@ class MapLayersDialogBase(wx.Dialog):
         :param str mapset: mapset name
         """
         self.map_layers = grass.list_grouped(type=type)[mapset]
-        self.layers.Set(natural_sort(self.map_layers))
+        self.layers.Set(naturally_sorted(self.map_layers))
 
         # check all items by default
         for item in range(self.layers.GetCount()):
@@ -1628,7 +1627,7 @@ class MapLayersDialogBase(wx.Dialog):
                     list.append(layer)
             except:
                 pass
-        list = natural_sort(list)
+        list = naturally_sorted(list)
 
         self.layers.Set(list)
         self.OnSelectAll(None)
@@ -1974,7 +1973,7 @@ class ImageSizeDialog(wx.Dialog):
         btnsizer.Realize()
 
         sizer.Add(btnsizer, proportion=0,
-                  flag=wx.EXPAND | wx.ALIGN_RIGHT | wx.ALL, border=5)
+                  flag=wx.EXPAND | wx.ALL, border=5)
 
         self.panel.SetSizer(sizer)
         sizer.Fit(self.panel)
@@ -1998,7 +1997,7 @@ class ImageSizeDialog(wx.Dialog):
 class SqlQueryFrame(wx.Frame):
 
     def __init__(self, parent, id=wx.ID_ANY,
-                 title=_("GRASS GIS SQL Query Utility"),
+                 title=_("SQL Query Utility"),
                  *kwargs):
         """SQL Query Utility window
         """
@@ -2358,19 +2357,27 @@ class QuitDialog(wx.Dialog):
                 wx.ART_QUESTION,
                 client=wx.ART_MESSAGE_BOX))
 
-        self.informLabel = StaticText(
-            parent=self.panel, id=wx.ID_ANY, label=_(
-                "Do you want to quit GRASS including shell "
-                "prompt or just close the GUI?"))
+        self._shell_running = is_shell_running()
+
+        if self._shell_running:
+            text = _(
+                "Do you want to quit GRASS GIS including shell "
+                "or just close the GUI?"
+            )
+        else:
+            text = _(
+                "Do you want to quit GRASS GIS?"
+            )
+        self.informLabel = StaticText(parent=self.panel, id=wx.ID_ANY, label=text)
         self.btnCancel = Button(parent=self.panel, id=wx.ID_CANCEL)
-        self.btnClose = Button(parent=self.panel, id=wx.ID_NO,
-                                  label=_("Close GUI"))
-        self.btnClose.SetFocus()
+        if self._shell_running:
+            self.btnClose = Button(
+                parent=self.panel, id=wx.ID_NO, label=_("Close GUI")
+            )
+            self.btnClose.Bind(wx.EVT_BUTTON, self.OnClose)
         self.btnQuit = Button(parent=self.panel, id=wx.ID_YES,
                                  label=_("Quit GRASS GIS"))
-        self.btnQuit.SetForegroundColour(wx.Colour(35, 142, 35))
-
-        self.btnClose.Bind(wx.EVT_BUTTON, self.OnClose)
+        self.btnQuit.SetFocus()
         self.btnQuit.Bind(wx.EVT_BUTTON, self.OnQuit)
 
         self.__layout()
@@ -2381,7 +2388,8 @@ class QuitDialog(wx.Dialog):
 
         btnSizer = wx.BoxSizer(wx.HORIZONTAL)
         btnSizer.Add(self.btnCancel, flag=wx.RIGHT, border=5)
-        btnSizer.Add(self.btnClose, flag=wx.RIGHT, border=5)
+        if self._shell_running:
+            btnSizer.Add(self.btnClose, flag=wx.RIGHT, border=5)
         btnSizer.Add(self.btnQuit, flag=wx.RIGHT, border=5)
 
         bodySizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -2588,7 +2596,7 @@ class DefaultFontDialog(wx.Dialog):
             fontlist.append(longname)
             fontdict[longname] = shortname
             fontdict_reverse[shortname] = longname
-        fontlist = natural_sort(list(set(fontlist)))
+        fontlist = naturally_sorted(list(set(fontlist)))
 
         return fontdict, fontdict_reverse, fontlist
 

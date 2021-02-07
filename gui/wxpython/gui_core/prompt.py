@@ -44,7 +44,7 @@ class GPrompt(object):
     See subclass GPromptPopUp and GPromptSTC.
     """
 
-    def __init__(self, parent, menuModel):
+    def __init__(self, parent, giface, menuModel):
         self.parent = parent                 # GConsole
         self.panel = self.parent.GetPanel()
 
@@ -63,8 +63,9 @@ class GPrompt(object):
         # command description (gtask.grassTask)
         self.cmdDesc = None
 
-        self.cmdbuffer = self._readHistory()
-        self.cmdindex = len(self.cmdbuffer)
+        self._loadHistory()
+        if giface:
+            giface.currentMapsetChanged.connect(self._loadHistory)
 
         # list of traced commands
         self.commands = list()
@@ -93,6 +94,11 @@ class GPrompt(object):
             fileHistory.close()
 
         return hist
+
+    def _loadHistory(self):
+        """Load history from a history file to data structures"""
+        self.cmdbuffer = self._readHistory()
+        self.cmdindex = len(self.cmdbuffer)
 
     def _getListOfMaps(self):
         """Get list of maps"""
@@ -134,8 +140,8 @@ class GPrompt(object):
 class GPromptSTC(GPrompt, wx.stc.StyledTextCtrl):
     """Styled wxGUI prompt with autocomplete and calltips"""
 
-    def __init__(self, parent, menuModel, margin=False):
-        GPrompt.__init__(self, parent=parent, menuModel=menuModel)
+    def __init__(self, parent, giface, menuModel, margin=False):
+        GPrompt.__init__(self, parent=parent, giface=giface, menuModel=menuModel)
         wx.stc.StyledTextCtrl.__init__(self, self.panel, id=wx.ID_ANY)
 
         #
@@ -167,8 +173,17 @@ class GPromptSTC(GPrompt, wx.stc.StyledTextCtrl):
         self.SetViewWhiteSpace(False)
         self.SetUseTabs(False)
         self.UsePopUp(True)
-        self.SetSelBackground(True, "#FFFF00")
         self.SetUseHorizontalScrollBar(True)
+
+        # support light and dark mode
+        bg_color = wx.SystemSettings().GetColour(wx.SYS_COLOUR_WINDOW)
+        fg_color = wx.SystemSettings().GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+        selection_color = wx.SystemSettings().GetColour(wx.SYS_COLOUR_HIGHLIGHT)
+        self.StyleSetBackground(wx.stc.STC_STYLE_DEFAULT, bg_color)
+        self.StyleSetForeground(wx.stc.STC_STYLE_DEFAULT, fg_color)
+        self.SetCaretForeground(fg_color)
+        self.SetSelBackground(True, selection_color)
+        self.StyleClearAll()
 
         #
         # bindings
@@ -468,9 +483,9 @@ class GPromptSTC(GPrompt, wx.stc.StyledTextCtrl):
                                     self.toComplete['cmd']).count('.')
                                 self.autoCompList.append(
                                     command.split('.', dotNumber)[-1])
-                        except UnicodeDecodeError as e:  # TODO: fix it
+                        except UnicodeDecodeError as error:
                             sys.stderr.write(
-                                DecodeString(command) + ": " + unicode(e))
+                                DecodeString(command) + ": " + str(error))
 
             except (KeyError, TypeError):
                 return
@@ -619,7 +634,8 @@ class GPromptSTC(GPrompt, wx.stc.StyledTextCtrl):
     def OnDestroy(self, event):
         """The clipboard contents can be preserved after
         the app has exited"""
-        wx.TheClipboard.Flush()
+        if wx.TheClipboard.IsOpened():
+            wx.TheClipboard.Flush()
         event.Skip()
 
     def OnCmdErase(self, event):

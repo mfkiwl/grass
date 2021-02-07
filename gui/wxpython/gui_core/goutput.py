@@ -36,23 +36,22 @@ from core.gcmd import GError, EncodeString
 from core.gconsole   import GConsole, \
     EVT_CMD_OUTPUT, EVT_CMD_PROGRESS, EVT_CMD_RUN, EVT_CMD_DONE, \
     Notification
+from core.globalvar import CheckWxVersion, wxPythonPhoenix
 from gui_core.prompt import GPromptSTC
-from gui_core.wrap import Button, ToggleButton, StaticText, \
+from gui_core.wrap import Button, ClearButton, ToggleButton, StaticText, \
     StaticBox
 from core.settings import UserSettings
-from gui_core.widgets import SearchModuleWidget
 
 
 GC_EMPTY = 0
-GC_SEARCH = 1
-GC_PROMPT = 2
+GC_PROMPT = 1
 
 
 class GConsoleWindow(wx.SplitterWindow):
     """Create and manage output console for commands run by GUI.
     """
 
-    def __init__(self, parent, gconsole, menuModel=None, margin=False,
+    def __init__(self, parent, giface, gconsole, menuModel=None, margin=False,
                  style=wx.TAB_TRAVERSAL | wx.FULL_REPAINT_ON_RESIZE,
                  gcstyle=GC_EMPTY,
                  **kwargs):
@@ -63,8 +62,7 @@ class GConsoleWindow(wx.SplitterWindow):
         :param margin: use margin in output pane (GStc)
         :param style: wx.SplitterWindow style
         :param gcstyle: GConsole style
-                        (GC_EMPTY, GC_PROMPT to show command prompt,
-                        GC_SEARCH to show search widget)
+                        (GC_EMPTY, GC_PROMPT to show command prompt)
         """
         wx.SplitterWindow.__init__(
             self, parent, id=wx.ID_ANY, style=style, **kwargs)
@@ -112,36 +110,18 @@ class GConsoleWindow(wx.SplitterWindow):
             margin=margin,
             wrap=None)
 
-        # search & command prompt
+        # command prompt
         # move to the if below
         # search depends on cmd prompt
-        self.cmdPrompt = GPromptSTC(parent=self, menuModel=self._menuModel)
+        self.cmdPrompt = GPromptSTC(
+            parent=self, giface=giface, menuModel=self._menuModel
+        )
         self.cmdPrompt.promptRunCmd.connect(lambda cmd:
                                             self._gconsole.RunCmd(command=cmd))
         self.cmdPrompt.showNotification.connect(self.showNotification)
 
         if not self._gcstyle & GC_PROMPT:
             self.cmdPrompt.Hide()
-
-        if self._gcstyle & GC_SEARCH:
-            self.infoCollapseLabelExp = _(
-                "Click here to show search module engine")
-            self.infoCollapseLabelCol = _(
-                "Click here to hide search module engine")
-            self.searchPane = wx.CollapsiblePane(
-                parent=self.panelOutput, label=self.infoCollapseLabelExp,
-                style=wx.CP_DEFAULT_STYLE | wx.CP_NO_TLW_RESIZE | wx.EXPAND)
-            self.MakeSearchPaneContent(
-                self.searchPane.GetPane(), self._menuModel)
-            self.searchPane.Collapse(True)
-            self.Bind(
-                wx.EVT_COLLAPSIBLEPANE_CHANGED,
-                self.OnSearchPaneChanged,
-                self.searchPane)
-            self.search.moduleSelected.connect(
-                lambda name: self.cmdPrompt.SetTextAndFocus(name + ' '))
-        else:
-            self.search = None
 
         if self._gcstyle & GC_PROMPT:
             cmdLabel = _("Command prompt")
@@ -155,10 +135,9 @@ class GConsoleWindow(wx.SplitterWindow):
                                     label=" %s " % cmdLabel)
 
         # buttons
-        self.btnOutputClear = Button(
-            parent=self.panelOutput, id=wx.ID_CLEAR)
+        self.btnOutputClear = ClearButton(parent=self.panelOutput)
         self.btnOutputClear.SetToolTip(_("Clear output window content"))
-        self.btnCmdClear = Button(parent=self.panelOutput, id=wx.ID_CLEAR)
+        self.btnCmdClear = ClearButton(parent=self.panelOutput)
         self.btnCmdClear.SetToolTip(_("Clear command prompt content"))
         self.btnOutputSave = Button(parent=self.panelOutput, id=wx.ID_SAVE)
         self.btnOutputSave.SetToolTip(
@@ -212,9 +191,6 @@ class GConsoleWindow(wx.SplitterWindow):
             promptSizer.Add(helpText,
                             proportion=0, flag=wx.EXPAND | wx.LEFT, border=5)
 
-        if self._gcstyle & GC_SEARCH:
-            self.outputSizer.Add(self.searchPane, proportion=0,
-                                 flag=wx.EXPAND | wx.ALL, border=3)
         self.outputSizer.Add(self.cmdOutput, proportion=1,
                              flag=wx.EXPAND | wx.ALL, border=3)
         if self._gcstyle & GC_PROMPT:
@@ -285,31 +261,6 @@ class GConsoleWindow(wx.SplitterWindow):
         # layout
         self.SetAutoLayout(True)
         self.Layout()
-
-    def MakeSearchPaneContent(self, pane, model):
-        """Create search pane"""
-        border = wx.BoxSizer(wx.VERTICAL)
-
-        self.search = SearchModuleWidget(parent=pane,
-                                         model=model)
-
-        self.search.showNotification.connect(self.showNotification)
-
-        border.Add(self.search, proportion=0,
-                   flag=wx.EXPAND | wx.ALL, border=1)
-
-        pane.SetSizer(border)
-        border.Fit(pane)
-
-    def OnSearchPaneChanged(self, event):
-        """Collapse search module box"""
-        if self.searchPane.IsExpanded():
-            self.searchPane.SetLabel(self.infoCollapseLabelCol)
-        else:
-            self.searchPane.SetLabel(self.infoCollapseLabelExp)
-
-        self.panelOutput.Layout()
-        self.panelOutput.SendSizeEvent()
 
     def GetPanel(self, prompt=True):
         """Get panel
@@ -599,7 +550,8 @@ class GStc(stc.StyledTextCtrl):
         self.SetTabWidth(4)
         self.SetUseTabs(False)
         self.UsePopUp(True)
-        self.SetSelBackground(True, "#FFFF00")
+        self.SetSelBackground(True,
+            wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT))
         self.SetUseHorizontalScrollBar(True)
 
         #
@@ -633,50 +585,65 @@ class GStc(stc.StyledTextCtrl):
             typesize = 10
         typesize = float(typesize)
 
+        fontInfo = wx.FontInfo(typesize)
+        fontInfo.FaceName(typeface)
+        fontInfo.Family(wx.FONTFAMILY_TELETYPE)
+        defaultFont = wx.Font(fontInfo)
+
+        self.StyleClearAll()
+
+        isDarkMode = False
+        if wxPythonPhoenix and CheckWxVersion([4, 1, 0]):
+            isDarkMode = wx.SystemSettings.GetAppearance().IsDark()
+
+        defaultBackgroundColour = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW)
+        defaultTextColour = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT)
+
         self.StyleDefault = 0
-        self.StyleDefaultSpec = "face:%s,size:%d,fore:#000000,back:#FFFFFF" % (
-            typeface,
-            typesize)
+        self.StyleSetFont(stc.STC_STYLE_DEFAULT, defaultFont)
+        self.StyleSetBackground(stc.STC_STYLE_DEFAULT, defaultBackgroundColour)
+        self.StyleSetForeground(stc.STC_STYLE_DEFAULT, defaultTextColour)
+
         self.StyleCommand = 1
-        self.StyleCommandSpec = "face:%s,size:%d,,fore:#000000,back:#bcbcbc" % (
-            typeface, typesize)
+        self.StyleSetBackground(self.StyleCommand, wx.Colour(154, 154, 154, 255))
+        self.StyleSetForeground(self.StyleCommand, defaultTextColour)
+
         self.StyleOutput = 2
-        self.StyleOutputSpec = "face:%s,size:%d,,fore:#000000,back:#FFFFFF" % (
-            typeface,
-            typesize)
+        self.StyleSetBackground(self.StyleOutput, defaultBackgroundColour)
+        self.StyleSetForeground(self.StyleOutput, defaultTextColour)
+
         # fatal error
         self.StyleError = 3
-        self.StyleErrorSpec = "face:%s,size:%d,,fore:#7F0000,back:#FFFFFF" % (
-            typeface,
-            typesize)
+        errorColour = wx.Colour(127, 0, 0)
+        if isDarkMode:
+            errorColour = wx.Colour(230, 0, 0)
+        self.StyleSetBackground(self.StyleError, defaultBackgroundColour)
+        self.StyleSetForeground(self.StyleError, errorColour)
+
         # warning
         self.StyleWarning = 4
-        self.StyleWarningSpec = "face:%s,size:%d,,fore:#0000FF,back:#FFFFFF" % (
-            typeface, typesize)
+        warningColour =  wx.Colour(0, 0, 255)
+        if isDarkMode:
+            warningColour = wx.Colour(0, 102, 255)
+        self.StyleSetBackground(self.StyleWarning, defaultBackgroundColour)
+        self.StyleSetForeground(self.StyleWarning, warningColour)
+
         # message
         self.StyleMessage = 5
-        self.StyleMessageSpec = "face:%s,size:%d,,fore:#000000,back:#FFFFFF" % (
-            typeface, typesize)
+        self.StyleSetBackground(self.StyleMessage, defaultBackgroundColour)
+        self.StyleSetForeground(self.StyleMessage, defaultTextColour)
+
         # unknown
         self.StyleUnknown = 6
-        self.StyleUnknownSpec = "face:%s,size:%d,,fore:#000000,back:#FFFFFF" % (
-            typeface, typesize)
-
-        # default and clear => init
-        self.StyleSetSpec(stc.STC_STYLE_DEFAULT, self.StyleDefaultSpec)
-        self.StyleClearAll()
-        self.StyleSetSpec(self.StyleCommand, self.StyleCommandSpec)
-        self.StyleSetSpec(self.StyleOutput, self.StyleOutputSpec)
-        self.StyleSetSpec(self.StyleError, self.StyleErrorSpec)
-        self.StyleSetSpec(self.StyleWarning, self.StyleWarningSpec)
-        self.StyleSetSpec(self.StyleMessage, self.StyleMessageSpec)
-        self.StyleSetSpec(self.StyleUnknown, self.StyleUnknownSpec)
+        self.StyleSetBackground(self.StyleUnknown, defaultBackgroundColour)
+        self.StyleSetForeground(self.StyleUnknown, defaultTextColour)
 
     def OnDestroy(self, evt):
         """The clipboard contents can be preserved after
         the app has exited"""
 
-        wx.TheClipboard.Flush()
+        if wx.TheClipboard.IsOpened():
+            wx.TheClipboard.Flush()
         evt.Skip()
 
     def AddTextWrapped(self, txt, wrap=None):
@@ -804,7 +771,7 @@ class GConsoleFrame(wx.Frame):
         self.gconsole = GConsole(guiparent=self)
         self.goutput = GConsoleWindow(parent=panel, gconsole=self.gconsole,
                                       menuModel=menuTreeBuilder.GetModel(),
-                                      gcstyle=GC_SEARCH | GC_PROMPT)
+                                      gcstyle=GC_PROMPT)
 
         mainSizer = wx.BoxSizer(wx.VERTICAL)
         mainSizer.Add(

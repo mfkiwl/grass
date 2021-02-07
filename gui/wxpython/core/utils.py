@@ -23,7 +23,6 @@ import six
 
 from grass.script import core as grass
 from grass.script import task as gtask
-from grass.exceptions import OpenError
 
 from core.gcmd import RunCommand
 from core.debug import Debug
@@ -671,7 +670,7 @@ def _parseFormats(output, writableOnly=False):
         patt = re.compile('\(rw\+?\)$', re.IGNORECASE)
 
     for line in output.splitlines():
-        key, name = map(lambda x: x.strip(), line.strip().rsplit(':', -1))
+        key, name = map(lambda x: x.strip(), line.strip().split(':', 1))
 
         if writableOnly and not patt.search(key):
             continue
@@ -1044,39 +1043,19 @@ def PilImageToWxImage(pilImage, copyAlpha=True):
         wxImage = EmptyImage(*pilImage.size)
         pilImageCopyRGBA = pilImage.copy()
         pilImageCopyRGB = pilImageCopyRGBA.convert('RGB')    # RGBA --> RGB
-        fn = getattr(
-            pilImageCopyRGB,
-            "tobytes",
-            getattr(
-                pilImageCopyRGB,
-                "tostring"))
-        pilImageRgbData = fn()
-        wxImage.SetData(pilImageRgbData)
-        fn = getattr(
-            pilImageCopyRGBA,
-            "tobytes",
-            getattr(
-                pilImageCopyRGBA,
-                "tostring"))
+        wxImage.SetData(pilImageCopyRGB.tobytes())
         # Create layer and insert alpha values.
         if wxPythonPhoenix:
-            wxImage.SetAlpha(fn()[3::4])
+            wxImage.SetAlpha(pilImageCopyRGBA.tobytes()[3::4])
         else:
-            wxImage.SetAlphaData(fn()[3::4])
+            wxImage.SetAlphaData(pilImageCopyRGBA.tobytes()[3::4])
 
     else:    # The resulting image will not have alpha.
         wxImage = EmptyImage(*pilImage.size)
         pilImageCopy = pilImage.copy()
         # Discard any alpha from the PIL image.
         pilImageCopyRGB = pilImageCopy.convert('RGB')
-        fn = getattr(
-            pilImageCopyRGB,
-            "tobytes",
-            getattr(
-                pilImageCopyRGB,
-                "tostring"))
-        pilImageRgbData = fn()
-        wxImage.SetData(pilImageRgbData)
+        wxImage.SetData(pilImageCopyRGB.tobytes())
 
     return wxImage
 
@@ -1195,6 +1174,27 @@ def unregisterPid(pid):
             'g.gisenv',
             set='GUI_PID={0}'.format(
                 ','.join(guiPid)))
+
+
+def get_shell_pid(env=None):
+    """Get shell PID from the GIS environment or None"""
+    try:
+        shell_pid = int(grass.gisenv(env=env)['PID'])
+        return shell_pid
+    except (KeyError, ValueError) as error:
+        Debug.msg(
+            1,
+            "No PID for GRASS shell (assuming no shell running): {}".format(error)
+        )
+        return None
+
+
+def is_shell_running():
+    """Return True if a separate shell is registered in the GIS environment"""
+    if get_shell_pid() is None:
+        return False
+    return True
+
 
 if __name__ == '__main__':
     sys.exit(doc_test())

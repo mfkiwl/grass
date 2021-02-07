@@ -27,7 +27,6 @@ import os
 import time
 import math
 import sys
-from copy import copy
 
 import wx
 
@@ -39,11 +38,10 @@ import grass.script as grass
 from gui_core.dialogs import SavedRegion
 from gui_core.wrap import DragImage, PseudoDC, EmptyBitmap, BitmapFromImage, \
     Window, Menu, Rect, NewId
-from core.gcmd import RunCommand, GException, GError, GMessage
+from core.gcmd import RunCommand, GException, GError
 from core.debug import Debug
 from core.settings import UserSettings
 from mapwin.base import MapWindowBase
-from core.utils import GetGEventAttribsForHandler
 import core.utils as utils
 from mapwin.graphics import GraphicsSet
 from core.gthread import gThread
@@ -200,7 +198,7 @@ class BufferedMapWindow(MapWindowBase, Window):
         self.Map.GetRenderMgr().renderDone.connect(self._updateMFinished)
 
         # vars for handling mouse clicks
-        self.dragid = -1
+        self.dragid = None
         self.lastpos = (0, 0)
 
         # list for registration of graphics to draw
@@ -284,12 +282,19 @@ class BufferedMapWindow(MapWindowBase, Window):
                       id=removeId)
             menu.Append(removeId, self.overlays[idlist[0]].removeLabel)
 
+            # raster legend can be resized
             if self.overlays[idlist[0]].name == 'legend':
                 resizeLegendId = NewId()
                 self.Bind(wx.EVT_MENU,
                           lambda evt: self.overlays[idlist[0]].StartResizing(),
                           id=resizeLegendId)
-                menu.Append(resizeLegendId, _("Resize legend"))
+                menu.Append(resizeLegendId, _("Resize and move legend"))
+
+            activateId = NewId()
+            self.Bind(wx.EVT_MENU,
+                      lambda evt: self.overlayActivated.emit(overlayId=idlist[0]),
+                      id=activateId)
+            menu.Append(activateId, self.overlays[idlist[0]].activateLabel)
         self.PopupMenu(menu)
         menu.Destroy()
 
@@ -869,7 +874,7 @@ class BufferedMapWindow(MapWindowBase, Window):
         updTime = time.time()
         self.lastUpdateMapReq = updTime
 
-        if self.updDelay <= 0.0:
+        if self.updDelay < 0.0:
             self._runUpdateMap()
         else:
             self.timerRunId = self.renderTimingThr.GetId()
@@ -1556,7 +1561,7 @@ class BufferedMapWindow(MapWindowBase, Window):
             self._onLeftUp(event)
 
         elif self.mouse['use'] == 'pointer':
-            if self.dragid and int(self.dragid) >= 0:
+            if self.dragid:
                 # end drag of overlay decoration
                 if self.overlays and self.dragid in self.overlays:
                     self.overlays[
@@ -1688,8 +1693,7 @@ class BufferedMapWindow(MapWindowBase, Window):
         pos = event.GetPosition()
         idlist = self.pdc.FindObjects(pos[0], pos[1], self.hitradius)
         if self.overlays and idlist and [i for i in idlist if i in list(self.overlays.keys())]:  # legend, scale bar, north arrow, dtext
-            self.SetToolTip("Double click in Pointer mode to set object"
-                            " properties,\nright click to remove")
+            self.SetToolTip("Right click to modify or remove")
         else:
             self.SetToolTip(None)
         event.Skip()

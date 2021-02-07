@@ -18,18 +18,17 @@ This program is free software under the GNU General Public License
 @author Anna Petrasova <kratochanna gmail.com>
 """
 import os
-import sys
 import wx
 import wx.aui
-import tempfile
 import six
 
 import grass.script as gcore
 import grass.temporal as tgis
+from grass.exceptions import FatalError
 from core import globalvar
 from gui_core.widgets import IntegerValidator
 from gui_core.wrap import StaticText, TextCtrl
-from core.gcmd import RunCommand
+from core.gcmd import RunCommand, GWarning
 
 from animation.mapwindow import AnimationWindow
 from animation.provider import BitmapProvider, BitmapPool, \
@@ -49,7 +48,7 @@ gcore.set_raise_on_error(True)
 
 class AnimationFrame(wx.Frame):
 
-    def __init__(self, parent, giface, title=_("GRASS GIS Animation tool"),
+    def __init__(self, parent, giface, title=_("Animation Tool"),
                  rasters=None, timeseries=None):
         wx.Frame.__init__(self, parent, title=title,
                           style=wx.DEFAULT_FRAME_STYLE, size=(800, 600))
@@ -65,7 +64,10 @@ class AnimationFrame(wx.Frame):
                 wx.BITMAP_TYPE_ICO))
 
         # Make sure the temporal database exists
-        tgis.init()
+        try:
+            tgis.init()
+        except FatalError as e:
+            GWarning(parent=self, message=str(e))
 
         # create temporal directory and ensure it's deleted after programs ends
         # (stored in MAPSET/.tmp/)
@@ -312,7 +314,7 @@ class AnimationFrame(wx.Frame):
                 lambda: self.controller.UpdateAnimations())
             dlg.CenterOnParent()
 
-        self.dialogs['preferences'].ShowModal()
+        self.dialogs['preferences'].Show()
 
     def OnHelp(self, event):
         RunCommand('g.manual',

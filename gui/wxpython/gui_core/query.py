@@ -13,11 +13,9 @@ This program is free software under the GNU General Public License
 
 @author Anna Kratochvilova <kratochanna gmail.com>
 """
-import os
 import wx
 import six
 
-from core.gcmd import DecodeString
 from gui_core.treeview import TreeListView
 from gui_core.wrap import Button, StaticText, Menu, NewId
 from core.treemodel import TreeModel, DictNode
@@ -56,7 +54,7 @@ class QueryDialog(wx.Dialog):
 
         self.tree.SetColumnWidth(0, 220)
         self.tree.SetColumnWidth(1, 1000)
-        self.tree.ExpandAll(self._model.root)
+        self.tree.ExpandAll()
         self.tree.RefreshItems()
         self.tree.contextMenu.connect(self.ShowContextMenu)
         self.mainSizer.Add(
@@ -220,13 +218,13 @@ def QueryTreeBuilder(data, column):
     def addNode(parent, data, model):
         for k, v in six.iteritems(data):
             if isinstance(v, dict):
-                node = model.AppendNode(parent=parent, label=k)
+                node = model.AppendNode(parent=parent, data={"label": k})
                 addNode(parent=node, data=v, model=model)
             else:
                 if not isinstance(v, six.string_types):
                     v = str(v)
-                node = model.AppendNode(parent=parent, label=k,
-                                        data={column: v})
+                node = model.AppendNode(parent=parent,
+                                        data={"label": k, column: v})
 
     model = TreeModel(DictNode)
     for part in data:

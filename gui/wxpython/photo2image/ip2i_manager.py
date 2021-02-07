@@ -1,8 +1,8 @@
 """
 @package photo2image.ip2i_manager
 
-@brief Scanning distortion correction of a photo for GRASS GIS. 
-Includes ground control point management and interactive point 
+@brief Scanning distortion correction of a photo for GRASS GIS.
+Includes ground control point management and interactive point
 and click GCP creation
 
 Classes:
@@ -40,16 +40,12 @@ import grass.script as grass
 
 from core import utils, globalvar
 from core.render import Map
-from gui_core.gselect import Select, LocationSelect, MapsetSelect
-from gui_core.dialogs import GroupDialog
+from gui_core.gselect import Select
 from core.gcmd import RunCommand, GMessage, GError, GWarning
 from core.settings import UserSettings
 from photo2image.ip2i_mapdisplay import MapFrame
-from core.giface import Notification
 from gui_core.wrap import SpinCtrl, Button, StaticText, StaticBox, \
     TextCtrl, Menu, ListCtrl, BitmapFromImage, CheckListCtrlMixin
-
-from location_wizard.wizard import TitledPage as TitledPage
 
 #
 # global variables
@@ -151,7 +147,7 @@ class GCPWizard(object):
 
         #
         # add layer to source map
-        #        
+        #
         try:
             # set computational region to match selected map and zoom display
             # to region
@@ -279,7 +275,7 @@ class GCP(MapFrame, ColumnSorterMixin):
             self.show_target = False
         else:
             self.show_target = True
-        
+
         self.camera = camera
 
         #wx.Frame.__init__(self, parent, id, title, size = size, name = "GCPFrame")
@@ -394,7 +390,7 @@ class GCP(MapFrame, ColumnSorterMixin):
                 if fc_count > storeLine :
                     dataFiducialX.append(line.split()[1])
                     dataFiducialY.append(line.split()[2])
-                    
+
         except IOError as err:
             GError(
                 parent=self,

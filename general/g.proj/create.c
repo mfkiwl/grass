@@ -10,8 +10,8 @@ void create_location(const char *location)
 {
     int ret;
 
-    ret = G_make_location_epsg(location, &cellhd, projinfo, projunits,
-                               projepsg);
+    ret = G_make_location_crs(location, &cellhd, projinfo, projunits,
+                              projsrid, projwkt);
     if (ret == 0)
 	G_message(_("Location <%s> created"), location);
     else if (ret == -1)
@@ -32,31 +32,39 @@ void modify_projinfo()
 {
     const char *mapset = G_mapset();
     struct Cell_head old_cellhd;
-    
+
     if (strcmp(mapset, "PERMANENT") != 0)
 	G_fatal_error(_("You must select the PERMANENT mapset before updating the "
 			"current location's projection (current mapset is <%s>)"),
 		      mapset);
-    
+
     /* Read projection information from current location first */
     G_get_default_window(&old_cellhd);
-    
+
     char path[GPATH_MAX];
-	
+
     /* Write out the PROJ_INFO, PROJ_UNITS, and PROJ_EPSG if available. */
     if (projinfo != NULL) {
 	G_file_name(path, "", "PROJ_INFO", "PERMANENT");
 	G_write_key_value_file(path, projinfo);
     }
-    
+
     if (projunits != NULL) {
 	G_file_name(path, "", "PROJ_UNITS", "PERMANENT");
 	G_write_key_value_file(path, projunits);
     }
-    
+
     if (projepsg != NULL) {
 	G_file_name(path, "", "PROJ_EPSG", "PERMANENT");
 	G_write_key_value_file(path, projepsg);
+    }
+
+    if (projwkt != NULL) {
+	G_write_projwkt(NULL, projwkt);
+    }
+
+    if (projsrid != NULL) {
+	G_write_projsrid(NULL, projsrid);
     }
 
     if ((old_cellhd.zone != cellhd.zone) ||

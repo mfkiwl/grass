@@ -24,7 +24,6 @@ This program is free software under the GNU General Public License
 """
 
 import os
-import sys
 import six
 
 import wx
@@ -41,8 +40,6 @@ from gmodeler.model import *
 from lmgr.menudata import LayerManagerMenuData
 from gui_core.wrap import Button, StaticText, StaticBox, TextCtrl, \
     Menu, ListCtrl, NewId, CheckListCtrlMixin
-
-from grass.script import task as gtask
 
 
 class ModelDataDialog(SimpleDialog):
@@ -162,7 +159,7 @@ class ModelDataDialog(SimpleDialog):
 
 class ModelSearchDialog(wx.Dialog):
 
-    def __init__(self, parent, title=_("Add GRASS command to the model"),
+    def __init__(self, parent, giface, title=_("Add GRASS command to the model"),
                  style=wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER, **kwargs):
         """Graphical modeler module search window
 
@@ -199,7 +196,7 @@ class ModelSearchDialog(wx.Dialog):
         menuModel = LayerManagerMenuData()
 
         self.cmd_prompt = GPromptSTC(
-            parent=self, menuModel=menuModel.GetModel())
+            parent=self, giface=giface, menuModel=menuModel.GetModel())
         self.cmd_prompt.promptRunCmd.connect(self.OnCommand)
         self.cmd_prompt.commandSelected.connect(
             lambda command: self.label.SetValue(command))

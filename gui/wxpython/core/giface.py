@@ -201,16 +201,40 @@ class GrassInterface:
         """
         raise NotImplementedError()
 
+    def UpdateCmdHistory(self, cmd):
+        """Add the command to the current history list shown to the user
 
-class StandaloneGrassInterface():
+        .. note::
+
+            Some implementations may not implement this method or do nothing.
+        """
+        raise NotImplementedError()
+
+
+class StandaloneGrassInterface(GrassInterface):
     """@implements GrassInterface"""
 
     def __init__(self):
 
         # Signal when some map is created or updated by a module.
+        # Used for adding/refreshing displayed layers.
         # attributes: name: map name, ltype: map type,
         # add: if map should be added to layer tree (questionable attribute)
         self.mapCreated = Signal('StandaloneGrassInterface.mapCreated')
+
+        # Signal for communicating current mapset has been switched
+        self.currentMapsetChanged = Signal('StandaloneGrassInterface.currentMapsetChanged')
+
+        # Signal for communicating something in current grassdb has changed.
+        # Parameters:
+        # action: required, is one of 'new', 'rename', 'delete'
+        # element: required, can be one of 'grassdb', 'location', 'mapset', 'raster', 'vector' and 'raster_3d'
+        # grassdb: path to grass db, required
+        # location: location name, required
+        # mapset: mapset name, required when element is 'mapset', 'raster', 'vector' or 'raster_3d'
+        # map: map name, required when element is 'raster', 'vector' or 'raster_3d'
+        # newname: new name (of mapset, map), required with action='rename'
+        self.grassdbChanged = Signal('StandaloneGrassInterface.grassdbChanged')
 
         # Signal emitted to request updating of map
         self.updateMap = Signal('StandaloneGrassInterface.updateMap')
@@ -309,4 +333,5 @@ class StandaloneGrassInterface():
         raise NotImplementedError()
 
     def UpdateCmdHistory(self, cmd):
-        raise NotImplementedError()
+        """There is no history displayed to the user, doing nothing"""
+        pass

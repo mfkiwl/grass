@@ -44,7 +44,7 @@ import wx
 from core import utils
 from core.giface import StandaloneGrassInterface
 from core.gcmd import RunCommand
-from core.render import Map, MapLayer, Overlay, RenderMapMgr
+from core.render import Map, MapLayer, RenderMapMgr
 from mapdisp.frame import MapFrame
 from core.debug import Debug
 from core.settings import UserSettings
@@ -457,7 +457,7 @@ class DMonGrassInterface(StandaloneGrassInterface):
             action = self._mapframe.RemoveToolbar
         else:
             action = self._mapframe.AddToolbar
-        toolbars = self._mapframe.GetToolbarNames()
+        toolbars = list(self._mapframe.GetToolbarNames())
         if not toolbars:
             toolbars.append('map')
         for toolbar in toolbars:
@@ -507,7 +507,7 @@ class MapApp(wx.App):
             toolbars.append('map')
 
         if __name__ == "__main__":
-            self.cmdTimeStamp = os.path.getmtime(monFile['cmd'])
+            self.cmdTimeStamp = 0 # fake initial timestamp
             self.Map = DMonMap(giface=self._giface, cmdfile=monFile['cmd'],
                                mapfile=monFile['map'])
 

@@ -671,7 +671,7 @@ def _formatMsg(text):
 
 def RunCommand(prog, flags="", overwrite=False, quiet=False,
                verbose=False, parent=None, read=False,
-               parse=None, stdin=None, getErrorMsg=False, **kwargs):
+               parse=None, stdin=None, getErrorMsg=False, env=None, **kwargs):
     """Run GRASS command
 
     :param prog: program to run
@@ -682,7 +682,10 @@ def RunCommand(prog, flags="", overwrite=False, quiet=False,
     :param parse: fn to parse stdout (e.g. grass.parse_key_val) or None
     :param stdin: stdin or None
     :param getErrorMsg: get error messages on failure
+    :param env: environment (optional, uses os.environ if not provided)
     :param kwargs: program parameters
+
+    The environment passed to the function (env or os.environ) is not modified (a copy is used internally).
 
     :return: returncode (read == False and getErrorMsg == False)
     :return: returncode, messages (read == False and getErrorMsg == True)
@@ -703,23 +706,27 @@ def RunCommand(prog, flags="", overwrite=False, quiet=False,
     if stdin:
         kwargs['stdin'] = subprocess.PIPE
 
+    # Do not change the environment, only a local copy.
+    if env:
+        env = env.copy()
+    else:
+        env = os.environ.copy()
+
     if parent:
-        messageFormat = os.getenv('GRASS_MESSAGE_FORMAT', 'gui')
-        os.environ['GRASS_MESSAGE_FORMAT'] = 'standard'
+        env['GRASS_MESSAGE_FORMAT'] = 'standard'
 
     start = time.time()
 
-    ps = grass.start_command(prog, flags, overwrite, quiet, verbose, **kwargs)
+    ps = grass.start_command(prog, flags, overwrite, quiet, verbose, env=env, **kwargs)
 
     if stdin:
         ps.stdin.write(encode(stdin))
         ps.stdin.close()
         ps.stdin = None
 
-    stdout, stderr = list(map(DecodeString, ps.communicate()))
-
-    if parent:  # restore previous settings
-        os.environ['GRASS_MESSAGE_FORMAT'] = messageFormat
+    stdout, stderr = ps.communicate()
+    stderr = decode(stderr)
+    stdout = decode(stdout) if read else stdout
 
     ret = ps.returncode
     Debug.msg(1, "gcmd.RunCommand(): get return code %d (%.6f sec)" %

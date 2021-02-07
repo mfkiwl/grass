@@ -15,7 +15,6 @@ This program is free software under the GNU General Public License
 """
 
 import os
-import sys
 import wx
 
 import grass.script as grass
@@ -23,7 +22,6 @@ import grass.script as grass
 from gui_core.mapdisp import DoubleMapFrame
 from gui_core.dialogs import GetImageHandlers
 from mapwin.base import MapWindowProperties
-from core import globalvar
 from core.render import Map
 from mapdisp import statusbar as sb
 from core.debug import Debug
@@ -39,7 +37,7 @@ from mapswipe.dialogs import SwipeMapDialog, PreferencesDialog
 class SwipeMapFrame(DoubleMapFrame):
 
     def __init__(self, parent=None, giface=None,
-                 title=_("GRASS GIS Map Swipe"), name="swipe", **kwargs):
+                 title=_("Map Swipe"), name="swipe", **kwargs):
         DoubleMapFrame.__init__(self, parent=parent, title=title, name=name,
                                 firstMap=Map(), secondMap=Map(), **kwargs)
         Debug.msg(1, "SwipeMapFrame.__init__()")
@@ -170,8 +168,7 @@ class SwipeMapFrame(DoubleMapFrame):
 
         # create statusbar and its manager
         statusbar = self.CreateStatusBar(number=4, style=0)
-        if globalvar.wxPython3:
-            statusbar.SetMinHeight(24)
+        statusbar.SetMinHeight(24)
         statusbar.SetStatusWidths([-5, -2, -1, -1])
         self.statusbarManager = sb.SbManager(
             mapframe=self, statusbar=statusbar)
@@ -400,14 +397,15 @@ class SwipeMapFrame(DoubleMapFrame):
             self.rasters['first'], self.rasters['second'] = first, second
             res1 = self.SetFirstRaster(name=self.rasters['first'])
             res2 = self.SetSecondRaster(name=self.rasters['second'])
-            if not (res1 and res2) and first and second:
+            if not (res1 and res2) and (first or second):
                 message = ''
-                if not res1:
+                if first and not res1:
                     message += _("Map <%s> not found. ") % self.rasters[
                         'first']
-                if not res2:
+                if second and not res2:
                     message += _("Map <%s> not found.") % self.rasters[
                         'second']
+                if message:
                     GError(parent=self, message=message)
                     return
             self.ZoomToMap()
@@ -422,25 +420,27 @@ class SwipeMapFrame(DoubleMapFrame):
 
     def SetFirstRaster(self, name):
         """Set raster map to first Map"""
-        raster = grass.find_file(name=name, element='cell')
-        if raster['fullname']:
-            self.rasters['first'] = raster['fullname']
-            self.SetLayer(
-                name=raster['fullname'],
-                mapInstance=self.GetFirstMap())
-            return True
+        if name:
+            raster = grass.find_file(name=name, element='cell')
+            if raster.get('fullname'):
+                self.rasters['first'] = raster['fullname']
+                self.SetLayer(
+                    name=raster['fullname'],
+                    mapInstance=self.GetFirstMap())
+                return True
 
         return False
 
     def SetSecondRaster(self, name):
         """Set raster map to second Map"""
-        raster = grass.find_file(name=name, element='cell')
-        if raster['fullname']:
-            self.rasters['second'] = raster['fullname']
-            self.SetLayer(
-                name=raster['fullname'],
-                mapInstance=self.GetSecondMap())
-            return True
+        if name:
+            raster = grass.find_file(name=name, element='cell')
+            if raster.get('fullname'):
+                self.rasters['second'] = raster['fullname']
+                self.SetLayer(
+                    name=raster['fullname'],
+                    mapInstance=self.GetSecondMap())
+                return True
 
         return False
 
@@ -750,13 +750,14 @@ class SwipeMapFrame(DoubleMapFrame):
             self._preferencesDialog = dlg
             self._preferencesDialog.CenterOnParent()
 
-        self._preferencesDialog.ShowModal()
+        self._preferencesDialog.Show()
 
     def OnCloseWindow(self, event):
         self.GetFirstMap().Clean()
         self.GetSecondMap().Clean()
         self._mgr.UnInit()
-        self._inputDialog.UnInit()
+        if self._inputDialog:
+            self._inputDialog.UnInit()
         self.Destroy()
 
 

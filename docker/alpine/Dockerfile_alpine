@@ -1,5 +1,5 @@
-FROM mundialis/docker-pdal:1.8.0 as pdal
-FROM alpine:3.11 as common
+FROM mundialis/docker-pdal:2.1.0 as pdal
+FROM alpine:3.12 as common
 
 # Based on:
 # https://github.com/mundialis/docker-grass-gis/blob/master/Dockerfile
@@ -21,6 +21,7 @@ ENV PACKAGES="\
       flex \
       freetype \
       gdal \
+      gdal-tools \
       gettext \
       geos \
       gnutls \
@@ -71,7 +72,6 @@ RUN echo "Install main packages";\
     apk add --no-cache $PACKAGES
 
 COPY --from=pdal /usr/bin/pdal* /usr/bin/
-COPY --from=pdal /usr/lib/pdal /usr/lib/pdal
 COPY --from=pdal /usr/lib/libpdal* /usr/lib/
 COPY --from=pdal /usr/lib/pkgconfig/pdal.pc /usr/lib/pkgconfig/pdal.pc
 COPY --from=pdal /usr/include/pdal /usr/include/pdal
@@ -131,6 +131,7 @@ ENV GRASS_BUILD_PACKAGES="\
       gcc \
       gdal-dev \
       geos-dev \
+      git \
       gnutls-dev \
       libc6-compat \
       libjpeg-turbo-dev \

@@ -21,27 +21,20 @@ This program is free software under the GNU General Public License
 """
 
 import os
-import sys
 
 import wx
 from core import globalvar
-if globalvar.wxPythonPhoenix:
-    try:
-        import agw.flatnotebook as FN
-    except ImportError: # if it's not there locally, try the wxPython lib.
-        import wx.lib.agw.flatnotebook as FN
-else:
-    import wx.lib.flatnotebook as FN
 import wx.lib.filebrowsebutton as filebrowse
 
 from grass.script import core as grass
 from grass.script import task as gtask
 
-from core.gcmd import RunCommand, GMessage, GWarning
+from core.gcmd import GError, GMessage, GWarning, RunCommand
 from gui_core.forms import CmdPanel
-from gui_core.gselect import OgrTypeSelect, GdalSelect, SubGroupSelect
-from gui_core.widgets import LayersList, GListCtrl, GNotebook
-from gui_core.wrap import Button, StaticText, StaticBox
+from gui_core.gselect import GdalSelect
+from gui_core.widgets import GListCtrl, GNotebook, LayersList, \
+    LayersListValidator
+from gui_core.wrap import Button, CloseButton, StaticText, StaticBox
 from core.utils import GetValidLayerName
 from core.settings import UserSettings, GetDisplayVectSettings
 
@@ -100,6 +93,10 @@ class ImportDialog(wx.Dialog):
                 group='cmd',
                 key='overwrite',
                 subkey='enabled'))
+        self.overwrite.Bind(wx.EVT_CHECKBOX, self.OnCheckOverwrite)
+        if UserSettings.Get(group='cmd', key='overwrite',
+                            subkey='enabled'):
+            self.list.validate = False
 
         self.add = wx.CheckBox(parent=self.panel, id=wx.ID_ANY)
         self.closeOnFinish = wx.CheckBox(parent=self.panel, id=wx.ID_ANY,
@@ -114,14 +111,12 @@ class ImportDialog(wx.Dialog):
         # buttons
         #
         # cancel
-        self.btn_close = Button(parent=self.panel, id=wx.ID_CLOSE)
+        self.btn_close = CloseButton(parent=self.panel)
         self.btn_close.SetToolTip(_("Close dialog"))
         self.btn_close.Bind(wx.EVT_BUTTON, self.OnClose)
         # run
         self.btn_run = Button(
-            parent=self.panel,
-            id=wx.ID_OK,
-            label=_("&Import"))
+            parent=self.panel, id=wx.ID_OK, label=_("&Import"))
         self.btn_run.SetToolTip(_("Import selected layers"))
         self.btn_run.SetDefault()
         self.btn_run.Bind(wx.EVT_BUTTON, self.OnRun)
@@ -129,21 +124,13 @@ class ImportDialog(wx.Dialog):
         self.Bind(wx.EVT_CLOSE, lambda evt: self.Destroy())
 
         self.notebook = GNotebook(parent=self,
-                                  style=FN.FNB_FANCY_TABS | FN.FNB_BOTTOM |
-                                  FN.FNB_NO_X_BUTTON)
+                                  style=globalvar.FNPageDStyle)
 
         self.notebook.AddPage(page=self.panel,
                               text=_('Source settings'),
                               name='source')
 
         self.createSettingsPage()
-
-        # Enable copying to clipboard with cmd+c from dialog on macOS
-        # (default key binding will close the dialog), trac #3592
-        if sys.platform == "darwin":
-            self.Bind(wx.EVT_MENU, self.OnCopyToClipboard, id=wx.ID_COPY)
-            self.accel_tbl = wx.AcceleratorTable([(wx.ACCEL_CTRL, ord("C"), wx.ID_COPY)])
-            self.SetAcceleratorTable(self.accel_tbl)
 
     def createSettingsPage(self):
 
@@ -241,6 +228,34 @@ class ImportDialog(wx.Dialog):
         """Get flags which will not be showed in Settings page"""
         raise NotImplementedError()
 
+    def _nameValidationFailed(self, layers_list):
+        """Output map name validation callback
+
+        :param layers_list: LayersList class instance
+        """
+        if isinstance(layers_list.output_map, list):
+            maps = [
+                '<{}>'.format(m) for m in layers_list.output_map]
+            message = _(
+                "Output map names %(names)s exist. "
+            ) % {
+                'names': ', '.join(maps)}
+        else:
+            message = _(
+                "Output map name <%(name)s> exist. "
+                ) % {
+                'name': layers_list.output_map}
+        GError(parent=self, message=message, caption=_("Invalid name"))
+
+    def _validateOutputMapName(self):
+        """Enable/disable output map name validation according the
+        overwrite state"""
+        if not self.overwrite.IsChecked():
+            if not self.list.GetValidator().\
+               Validate(win=self.list, validate_all=True):
+                return False
+        return True
+
     def OnClose(self, event=None):
         """Close dialog"""
         self.Close()
@@ -248,6 +263,13 @@ class ImportDialog(wx.Dialog):
     def OnRun(self, event):
         """Import/Link data (each layes as separate vector map)"""
         pass
+
+    def OnCheckOverwrite(self, event):
+        """Check/uncheck overwrite checkbox widget"""
+        if self.overwrite.IsChecked():
+            self.list.validate = False
+        else:
+            self.list.validate = True
 
     def AddLayers(self, returncode, cmd=None, userData=None):
         """Add imported/linked layers into layer tree"""
@@ -318,13 +340,6 @@ class ImportDialog(wx.Dialog):
         """Do what has to be done after importing"""
         pass
 
-    def OnCopyToClipboard(self, event):
-        """Copy selected text in dialog to the clipboard"""
-        try:
-            wx.Window.FindFocus().Copy()
-        except:
-            pass
-
     def _getLayersToReprojetion(self, projMatch_idx, grassName_idx):
         """If there are layers with different projection from loation projection,
            show dialog to user to explicitly select layers which will be reprojected..."""
@@ -387,6 +402,12 @@ class GdalImportDialog(ImportDialog):
         self.layersData = []
 
         ImportDialog.__init__(self, parent, giface=giface, itype='gdal')
+
+        self.list.SetValidator(
+            LayersListValidator(
+                condition='raster',
+                callback=self._nameValidationFailed))
+
         if link:
             self.SetTitle(_("Link external raster data"))
         else:
@@ -420,6 +441,7 @@ class GdalImportDialog(ImportDialog):
     def reload(self, data, listData):
 
         self.list.LoadData(listData)
+        self.list.SelectAll(select=True)
         self.layersData = data
 
     def OnRun(self, event):
@@ -435,6 +457,9 @@ class GdalImportDialog(ImportDialog):
         if not data:
             GMessage(_("No layers selected. Operation canceled."),
                      parent=self)
+            return
+
+        if not self._validateOutputMapName():
             return
 
         dsn = self.dsnInput.GetDsn()
@@ -528,6 +553,12 @@ class OgrImportDialog(ImportDialog):
         self.layersData = []
 
         ImportDialog.__init__(self, parent, giface=giface, itype='ogr')
+
+        self.list.SetValidator(
+            LayersListValidator(
+                condition='vector',
+                callback=self._nameValidationFailed))
+
         if link:
             self.SetTitle(_("Link external vector data"))
         else:
@@ -561,6 +592,7 @@ class OgrImportDialog(ImportDialog):
     def reload(self, data, listData):
 
         self.list.LoadData(listData)
+        self.list.SelectAll(select=True)
         self.layersData = data
 
     def OnRun(self, event):
@@ -576,6 +608,9 @@ class OgrImportDialog(ImportDialog):
         if not data:
             GMessage(_("No layers selected. Operation canceled."),
                      parent=self)
+            return
+
+        if not self._validateOutputMapName():
             return
 
         dsn = self.dsnInput.GetDsn()
@@ -714,7 +749,7 @@ class GdalOutputDialog(wx.Dialog):
         dialogSizer.Add(
             btnSizer,
             proportion=0,
-            flag=wx.ALIGN_CENTER_VERTICAL | wx.BOTTOM | wx.TOP | wx.ALIGN_RIGHT,
+            flag=wx.BOTTOM | wx.TOP | wx.ALIGN_RIGHT,
             border=10)
 
         self.panel.SetAutoLayout(True)
@@ -757,6 +792,12 @@ class DxfImportDialog(ImportDialog):
     def __init__(self, parent, giface):
         ImportDialog.__init__(self, parent, giface=giface, itype='dxf',
                               title=_("Import DXF layers"))
+
+        self.list.SetValidator(
+            LayersListValidator(
+                condition='vector',
+                callback=self._nameValidationFailed))
+
         self._giface = giface
         self.dsnInput = filebrowse.FileBrowseButton(
             parent=self.panel,
@@ -785,6 +826,9 @@ class DxfImportDialog(ImportDialog):
         data = self.list.GetLayers()
         if not data:
             GMessage(_("No layers selected."), parent=self)
+            return
+
+        if not self._validateOutputMapName():
             return
 
         # hide dialog
@@ -890,6 +934,7 @@ class ReprojectionDialog(wx.Dialog):
             self.list.SetColumnWidth(col=i, width=width[i])
 
         self.list.LoadData(data)
+        self.list.SelectAll(True)
 
         self.labelText = StaticText(parent=self.panel, id=wx.ID_ANY, label=_(
             "Projection of following layers do not match with projection of current location. "))

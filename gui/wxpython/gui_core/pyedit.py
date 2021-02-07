@@ -30,11 +30,12 @@ if __name__ == '__main__':
     set_gui_path()
 
 from core.gcmd import GError
-from gui_core.pystc import PyStc
+from gui_core.pystc import PyStc, SetDarkMode
 from core import globalvar
 from core.menutree import MenuTreeModelBuilder
-from gui_core.menu import Menu
+from gui_core.menu import RecentFilesMenu, Menu
 from gui_core.toolbars import BaseToolbar, BaseIcons
+from gui_core.wrap import IsDark
 from icons.icon import MetaIcon
 from core.debug import Debug
 
@@ -50,11 +51,11 @@ def script_template():
     """The most simple script which runs and gives something"""
     return r"""#!/usr/bin/env python3
 
-import grass.script as gscript
+import grass.script as gs
 
 
 def main():
-    gscript.run_command('g.region', flags='p')
+    gs.run_command('g.region', flags='p')
 
 
 if __name__ == '__main__':
@@ -110,7 +111,7 @@ import sys
 import os
 import atexit
 
-import grass.script as gscript
+import grass.script as gs
 """)
 
     # cleanup()
@@ -121,14 +122,14 @@ RAST_REMOVE = []
 def cleanup():
 """)
     output.write(
-        r"""    gscript.run_command('g.remove', flags='f', type='raster',
-                          name=RAST_REMOVE)
+        r"""    gs.run_command('g.remove', flags='f', type='raster',
+                   name=RAST_REMOVE)
 """)
     output.write("\ndef main():\n")
     output.write(
-        r"""    options, flags = gscript.parser()
-    gscript.run_command('g.remove', flags='f', type='raster',
-                        name=RAST_REMOVE)
+        r"""    options, flags = gs.parser()
+    gs.run_command('g.remove', flags='f', type='raster',
+                   name=RAST_REMOVE)
 """)
 
     output.write("\n    return 0\n")
@@ -146,17 +147,17 @@ def script_example():
     """Example of a simple script"""
     return r"""#!/usr/bin/env python3
 
-import grass.script as gscript
+import grass.script as gs
 
 def main():
     input_raster = 'elevation'
     output_raster = 'high_areas'
-    stats = gscript.parse_command('r.univar', map='elevation', flags='g')
+    stats = gs.parse_command('r.univar', map='elevation', flags='g')
     raster_mean = float(stats['mean'])
     raster_stddev = float(stats['stddev'])
     raster_high = raster_mean + raster_stddev
-    gscript.mapcalc('{r} = {a} > {m}'.format(r=output_raster, a=input_raster,
-                                             m=raster_high))
+    gs.mapcalc('{r} = {a} > {m}'.format(r=output_raster, a=input_raster,
+                                        m=raster_high))
 
 if __name__ == "__main__":
     main()
@@ -187,16 +188,16 @@ def module_example():
 
 import sys
 
-import grass.script as gscript
+import grass.script as gs
 
 
 def main():
-    options, flags = gscript.parser()
+    options, flags = gs.parser()
     araster = options['araster']
     braster = options['braster']
     output = options['output']
 
-    gscript.mapcalc('{r} = {a} + {b}'.format(r=output, a=araster, b=braster))
+    gs.mapcalc('{r} = {a} + {b}'.format(r=output, a=araster, b=braster))
 
     return 0
 
@@ -224,24 +225,24 @@ def module_error_handling_example():
 
 import sys
 
-import grass.script as gscript
+import grass.script as gs
 from grass.exceptions import CalledModuleError
 
 
 def main():
-    options, flags = gscript.parser()
+    options, flags = gs.parser()
     input_raster = options['input']
     output_raster = options['output']
 
     try:
-        stats = gscript.parse_command('r.univar', map=input_raster, flags='g')
+        stats = gs.parse_command('r.univar', map=input_raster, flags='g')
     except CalledModuleError as e:
-        gscript.fatal('{0}'.format(e))
+        gs.fatal('{0}'.format(e))
     raster_mean = float(stats['mean'])
     raster_stddev = float(stats['stddev'])
     raster_high = raster_mean + raster_stddev
-    gscript.mapcalc('{r} = {i} > {v}'.format(r=output_raster, i=input_raster,
-                                             v=raster_high))
+    gs.mapcalc('{r} = {i} > {v}'.format(r=output_raster, i=input_raster,
+                                        v=raster_high))
     return 0
 
 
@@ -269,42 +270,107 @@ class PyEditController(object):
         self.overwrite = False
         self.parameters = None
 
+        # Get first (File) menu
+        menu = guiparent.menubar.GetMenu(0)
+        self.recent_files = RecentFilesMenu(
+            app_name='pyedit', parent_menu=menu, pos=1,
+        ) # pos=1 recent files menu position (index) in the parent (File) menu
+
+        self.recent_files.file_requested.connect(self.OpenRecentFile)
+
+    def _openFile(self, file_path):
+        """Try open file and read content
+
+        :param str file_path: file path
+
+        :return str or None: file content or None
+        """
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+                return content
+        except PermissionError:
+            GError(
+                message=_(
+                    "Permission denied <{}>. Please change file "
+                    "permission for reading.".format(file_path)
+                ),
+                parent=self.guiparent,
+                showTraceback=False,
+            )
+        except IOError:
+            GError(
+                message=_("Couldn't read file <{}>.".format(file_path)),
+                parent=self.guiparent,
+            )
+
+    def _writeFile(self, file_path, content, additional_err_message=''):
+        """Try open file and write content
+
+        :param str file_path: file path
+        :param str content: content written to the file
+        :param str additional_err_message: additional error message
+
+        :return None or True: file written or None
+        """
+        try:
+            with open(file_path, 'w') as f:
+                f.write(content)
+                return True
+        except PermissionError:
+            GError(
+                message=_(
+                    "Permission denied <{}>. Please change file "
+                    "permission for writting.{}".format(
+                        file_path, additional_err_message,
+                    ),
+                ),
+                parent=self.guiparent,
+                showTraceback=False,
+            )
+        except IOError:
+            GError(
+                message=_(
+                    "Couldn't write file <{}>.{}".
+                    format(file_path, additional_err_message),
+                ),
+                parent=self.guiparent,
+            )
+
     def OnRun(self, event):
         """Run Python script"""
         if not self.filename:
             self.filename = gscript.tempfile() + '.py'
             self.tempfile = True
-            try:
-                fd = open(self.filename, "w")
-                fd.write(self.body.GetText())
-            except IOError as e:
-                GError(_("Unable to launch Python script. %s") % e,
-                       parent=self.guiparent)
-                return
-            finally:
-                fd.close()
+            file_is_written = self._writeFile(
+                file_path=self.filename, content=self.body.GetText(),
+                additional_err_message=" Unable to launch Python script.",
+
+            )
+            if file_is_written:
                 mode = stat.S_IMODE(os.lstat(self.filename)[stat.ST_MODE])
                 os.chmod(self.filename, mode | stat.S_IXUSR)
         else:
             # always save automatically before running
-            fd = open(self.filename, "w")
-            try:
-                fd.write(self.body.GetText())
-            finally:
-                fd.close()
-            # set executable file
-            # (not sure if needed every time but useful for opened files)
-            os.chmod(self.filename, stat.S_IRWXU | stat.S_IWUSR)
+            file_is_written = self._writeFile(
+                file_path=self.filename, content=self.body.GetText(),
+                additional_err_message=" Unable to launch Python script.",
+            )
+            if file_is_written:
+                # set executable file
+                # (not sure if needed every time but useful for opened files)
+                os.chmod(self.filename, stat.S_IRWXU | stat.S_IWUSR)
 
-        # run in console as other modules, avoid Python shell which
-        # carries variables over to the next execution
-        env = os.environ.copy()
-        if self.overwrite:
-            env['GRASS_OVERWRITE'] = '1'
-        cmd = [fd.name]
-        if self.parameters:
-            cmd.extend(self.parameters)
-        self.giface.RunCmd(cmd, env=env)
+        if file_is_written:
+            # run in console as other modules, avoid Python shell which
+            # carries variables over to the next execution
+            env = os.environ.copy()
+            if self.overwrite:
+                env['GRASS_OVERWRITE'] = '1'
+            cmd = [self.filename]
+            if self.parameters:
+                cmd.extend(self.parameters)
+            self.giface.RunCmd(cmd, env=env)
 
     def SaveAs(self):
         """Save python script to file"""
@@ -349,14 +415,12 @@ class PyEditController(object):
     def Save(self):
         """Save current content to a file and set executable permissions"""
         assert self.filename
-        fd = open(self.filename, "w")
-        try:
-            fd.write(self.body.GetText())
-        finally:
-            fd.close()
-
-        # executable file
-        os.chmod(self.filename, stat.S_IRWXU | stat.S_IWUSR)
+        file_is_written = self._writeFile(
+                 file_path=self.filename, content=self.body.GetText(),
+             )
+        if file_is_written:
+            # executable file
+            os.chmod(self.filename, stat.S_IRWXU | stat.S_IWUSR)
 
     def OnSave(self, event):
         """Save python script to file
@@ -367,6 +431,11 @@ class PyEditController(object):
             self.Save()
         else:
             self.SaveAs()
+
+        if self.filename:
+            self.recent_files.AddFileToHistory(
+                filename=self.filename,
+            )
 
     def IsModified(self):
         """Check if python script has been modified"""
@@ -387,11 +456,11 @@ class PyEditController(object):
         if not filename:
             return
 
-        fd = open(filename, "r")
-        try:
-            self.body.SetText(fd.read())
-        finally:
-            fd.close()
+        content = self._openFile(file_path=filename)
+        if content:
+            self.body.SetText(content)
+        else:
+            return
 
         self.filename = filename
         self.tempfile = False
@@ -400,6 +469,36 @@ class PyEditController(object):
         """Handle open event but ask about replacing content first"""
         if self.CanReplaceContent('file'):
             self.Open()
+            if self.filename:
+                self.recent_files.AddFileToHistory(
+                    filename=self.filename,
+                )
+
+    def OpenRecentFile(self, path, file_exists, file_history):
+        """Try open recent file and read content
+
+        :param str path: file path
+        :param bool file_exists: file path exists
+        :param bool file_history: file history obj instance
+
+        :return: None
+        """
+        if not file_exists:
+            GError(
+                _(
+                    "File <{}> doesn't exist."
+                    "It was probably moved or deleted.".format(path)
+                ),
+                parent=self.guiparent,
+            )
+        else:
+            if self.CanReplaceContent(by_message='file'):
+                self.filename = path
+                content = self._openFile(file_path=path)
+                if content:
+                    self.body.SetText(content)
+                    file_history.AddFileToHistory(filename=path)  # move up the list
+                    self.tempfile = False
 
     def IsEmpty(self):
         """Check if python script is empty"""
@@ -418,29 +517,34 @@ class PyEditController(object):
     def SetScriptTemplate(self, event):
         if self.CanReplaceContent('template'):
             self.body.SetText(script_template())
+            self.filename = None
 
     def SetModuleTemplate(self, event):
         if self.CanReplaceContent('template'):
             self.body.SetText(module_template())
+            self.filename = None
 
     def SetScriptExample(self, event):
         if self.CanReplaceContent('example'):
             self.body.SetText(script_example())
+            self.filename = None
 
     def SetModuleExample(self, event):
         if self.CanReplaceContent('example'):
             self.body.SetText(module_example())
+            self.filename = None
 
     def SetModuleErrorHandlingExample(self, event):
         if self.CanReplaceContent('example'):
             self.body.SetText(module_error_handling_example())
+            self.filename = None
 
     def CanReplaceContent(self, by_message):
         """Check with user if we can replace content by something else
 
         Asks user if replacement is OK depending on the state of the editor.
         Use before replacing all editor content by some other text.
-        
+
         :param by_message: message used to ask user if it is OK to replace
             the content with something else; special values are 'template',
             'example' and 'file' which will use predefined messages, otherwise
@@ -488,7 +592,7 @@ class PyEditController(object):
         # not using g.manual because it does not show
         entry = 'libpython/script_intro.html'
         major, minor, patch = gscript.version()['version'].split('.')
-        url = 'http://grass.osgeo.org/grass%s%s/manuals/%s' % (
+        url = 'https://grass.osgeo.org/grass%s%s/manuals/%s' % (
             major, minor, entry)
         open_url(url)
 
@@ -530,6 +634,8 @@ class PyEditToolbar(BaseToolbar):
                                       label=_('Activate overwrite')),
             'overwriteFalse': MetaIcon(img='unlocked',
                                        label=_('Deactive overwrite')),
+            'quit': MetaIcon(img='quit',
+                             label=_('Quit Simple Python Editor')),
         }
 
         # workaround for http://trac.wxwidgets.org/ticket/13888
@@ -555,6 +661,8 @@ class PyEditToolbar(BaseToolbar):
                                      (None, ),
                                      ("help", BaseIcons['help'],
                                       self.parent.OnHelp),
+                                     ('quit', self.icons['quit'],
+                                      self.parent.OnClose),
                                      ))
 
     # TODO: add overwrite also to the menu and sync with toolbar
@@ -580,7 +688,7 @@ class PyEditFrame(wx.Frame):
     # pylint: disable=invalid-name
 
     def __init__(self, parent, giface, id=wx.ID_ANY,
-                 title=_("GRASS GIS Simple Python Editor"),
+                 title=_("Simple Python Editor"),
                  **kwargs):
         wx.Frame.__init__(self, parent=parent, id=id, title=title, **kwargs)
         self.parent = parent
@@ -599,6 +707,8 @@ class PyEditFrame(wx.Frame):
             self.SetToolBar(self.toolbar)
 
         self.panel = PyStc(parent=self)
+        if IsDark():
+            SetDarkMode(self.panel)
         self.controller = PyEditController(
             panel=self.panel, guiparent=self, giface=giface)
 

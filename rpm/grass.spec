@@ -1,7 +1,3 @@
-# This package depends on automagic byte compilation
-# https://fedoraproject.org/wiki/Changes/No_more_automagic_Python_bytecompilation_phase_2
-%global _python_bytecompile_extra 1
-
 %global shortver 79
 %global macrosdir %(d=%{_rpmconfigdir}/macros.d; [ -d $d ] || d=%{_sysconfdir}/rpm; echo $d)
 
@@ -10,17 +6,34 @@ Version:	7.9.0
 Release:	1%{?dist}
 Summary:	GRASS GIS - Geographic Resources Analysis Support System
 
-%if 0%{?rhel}
+%if 0%{?fedora} >= 33 || 0%{?rhel} >= 9
+%bcond_without flexiblas
 %endif
+
+%if 0%{?rhel} >= 7
+%define __python %{__python3}
+%global python3_version_nodots 36
+%global main_python3 1
+%endif
+
+# Note that the bcond macros are named for the CLI option they create.
+# "%%bcond_without" means "ENABLE by default and create a --without option"
+%bcond_without python3
+
 License:	GPLv2+
 URL:		https://grass.osgeo.org
 Source0:	https://grass.osgeo.org/%{name}%{shortver}/source/%{name}-%{version}.tar.gz
-Source2:	%{name}-config.h
+# needed?
+# Source2:	%%{name}-config.h
 
 Patch1:		grass-7.8.0-buildroot.diff
 
 BuildRequires:	bison
-BuildRequires:	blas-devel
+%if %{with flexiblas}
+BuildRequires:	flexiblas-devel
+%else
+BuildRequires:	blas-devel, lapack-devel
+%endif
 BuildRequires:	cairo-devel
 BuildRequires:	gcc-c++
 BuildRequires:	desktop-file-utils
@@ -32,7 +45,7 @@ BuildRequires:	freetype-devel
 BuildRequires:	gdal-devel
 BuildRequires:	geos-devel
 BuildRequires:	gettext
-BuildRequires:	lapack-devel
+BuildRequires:	laszip-devel
 %if (0%{?rhel} > 6 || 0%{?fedora})
 BuildRequires:	libappstream-glib
 %endif
@@ -41,7 +54,7 @@ BuildRequires:	libtiff-devel
 BuildRequires:	libXmu-devel
 BuildRequires:	mesa-libGL-devel
 BuildRequires:	mesa-libGLU-devel
-%if (0%{?fedora} >= 27)
+%if (0%{?rhel} > 7 || 0%{?fedora})
 BuildRequires:	mariadb-connector-c-devel openssl-devel
 %else
 BuildRequires:	mysql-devel
@@ -50,9 +63,9 @@ BuildRequires:	mysql-devel
 BuildRequires:	netcdf-devel
 %endif
 BuildRequires:	python3
-%if 0%{?rhel} > 6
+%if 0%{?rhel} == 7
 # EPEL7
-BuildRequires:	python36-numpy
+BuildRequires:	python%{python3_version_nodots}-numpy
 %else
 BuildRequires:	python3-numpy
 %endif
@@ -62,36 +75,35 @@ BuildRequires:	postgresql-devel
 BuildRequires:	libpq-devel
 %endif
 BuildRequires:	proj-devel
-%if (0%{?fedora} >= 30)
+%if (0%{?rhel} > 7 || 0%{?fedora} >= 30)
 BuildRequires:	proj-datumgrid
-BuildRequires:	proj-datumgrid-world
 %else
 BuildRequires:	proj-epsg
 BuildRequires:	proj-nad
 %endif
+%if 0%{?fedora} >= 30
+BuildRequires:	proj-datumgrid-world
+%endif
 %if (0%{?rhel} <= 6 && !0%{?fedora})
 # argparse is included in python2.7+ but not python2.6
-BuildRequires:  python-argparse
+BuildRequires:	python-argparse
 %endif
-%if 0%{?rhel} > 6
+%if 0%{?rhel} == 7
 # EPEL7
-BuildRequires:	python36-dateutil
+BuildRequires:	python%{python3_version_nodots}-dateutil
 %else
 BuildRequires:	python3-dateutil
 %endif
 BuildRequires:	python3-devel
 %if (0%{?rhel} > 6 || 0%{?fedora})
-%if 0%{?rhel} > 6
-# EPEL7
-BuildRequires:	python-pillow
-%else
-# Fedora
-BuildRequires:  python3-pillow
-%endif
+BuildRequires:	python3-pillow
 %else
 # EPEL6
 BuildRequires:	python-imaging
 %endif
+BuildRequires:	PDAL
+BuildRequires:	PDAL-libs
+BuildRequires:	PDAL-devel
 BuildRequires:	readline-devel
 BuildRequires:	sqlite-devel
 BuildRequires:	subversion
@@ -103,37 +115,41 @@ BuildRequires:	libzstd-devel
 Requires:	bzip2-libs
 Requires:	libzstd
 Requires:	geos
-%if (0%{?fedora} >= 30)
+%if (0%{?rhel} > 7 || 0%{?fedora} >= 30)
 Requires:	proj-datumgrid
-Requires:	proj-datumgrid-world
 %else
 Requires:	proj-epsg
 Requires:	proj-nad
 %endif
+%if 0%{?fedora} >= 30
+Requires:  proj-datumgrid-world
+%endif
 Requires:	python3
-%if 0%{?rhel} > 6
+%if 0%{?rhel} == 7
 # EPEL7
-Requires:	python36-numpy
+Requires:	python%{python3_version_nodots}-numpy
 %else
 Requires:	python3-numpy
 %endif
 %if 0%{?rhel} > 6
-# EPEL7
+# EPEL7/EPEL8
 #Requires:  python3-matplotlib-wx
 %else
 Requires:	python3-matplotlib
 %endif
-%if 0%{?rhel} > 6
+%if 0%{?rhel} == 7
 # EPEL7
-Requires:	python36-dateutil
+Requires:	python%{python3_version_nodots}-dateutil
 %else
 Requires:	python3-dateutil
 %endif
-%if 0%{?rhel}
-Requires:	wxPython
+%if 0%{?rhel} && 0%{?rhel} < 7
+Requires: wxPython
 %else
 Requires:	python3-wxpython4
 %endif
+Requires:	PDAL
+Requires:	PDAL-libs
 
 %if "%{_lib}" == "lib"
 %global cpuarch 32
@@ -179,6 +195,10 @@ GRASS GIS development headers
 # Correct mysql_config query
 sed -i -e 's/--libmysqld-libs/--libs/g' configure
 
+%if %{with flexiblas}
+sed -i -e 's/-lblas/-lflexiblas/g' -e 's/-llapack/-lflexiblas/g' configure
+%endif
+
 # Fixup shebangs
 find -name \*.pl | xargs sed -i -e 's,#!/usr/bin/env perl,#!%{__perl},'
 
@@ -191,17 +211,26 @@ CXXFLAGS="-std=c++98 ${CFLAGS}"
 	--with-tiff \
 	--with-png \
 	--with-postgres \
+%if 0%{?rhel} > 7
+    --with-mysql=no \
+%else
 	--with-mysql \
+%endif
 	--with-opengl \
 	--with-odbc \
 	--with-fftw \
 	--with-blas \
 	--with-lapack \
+%if %{with flexiblas}
+	--with-blas-includes=%{_includedir}/flexiblas \
+	--with-lapack-includes=%{_includedir}/flexiblas \
+%endif
 	--with-cairo \
 %if (0%{?rhel} > 6 || 0%{?fedora})
 	--with-freetype \
 %endif
 	--with-nls \
+	--with-pdal \
 	--with-readline \
 	--with-regex \
 	--with-openmp \
@@ -262,7 +291,8 @@ install -p -m 644 %{name}.pc %{buildroot}%{_libdir}/pkgconfig
 # Create multilib header
 mv %{buildroot}%{_libdir}/%{name}%{shortver}/include/%{name}/config.h \
    %{buildroot}%{_libdir}/%{name}%{shortver}/include/%{name}/config-%{cpuarch}.h
-install -p -m 644 %{SOURCE2} %{buildroot}%{_libdir}/%{name}%{shortver}/include/%{name}/config.h
+# needed?
+# install -p -m 644 %%{SOURCE2} %%{buildroot}%%{_libdir}/%%{name}%%{shortver}/include/%%{name}/config.h
 
 # Make man pages available on the system, convert to utf8 and avoid name conflict
 mkdir -p %{buildroot}%{_mandir}/man1
@@ -288,7 +318,7 @@ appstream-util validate-relax --nonet %{buildroot}/%{_datadir}/metainfo/org.osge
 #rm -rf %%{buildroot}%%{_prefix}/%%{name}-%%{version}
 
 # Finally move entire tree to shortver subdir
-#mv %{buildroot}%{_libdir}/%{name}-%{version} %{buildroot}%{_libdir}/%{name}%{shortver}
+#mv %%{buildroot}%%{_libdir}/%%{name}-%%{version} %%{buildroot}%%{_libdir}/%%{name}%%{shortver}
 
 # rpm macro for version checking (not from buildroot!)
 mkdir -p ${RPM_BUILD_ROOT}%{macrosdir}
@@ -354,6 +384,49 @@ fi
 %{_libdir}/%{name}%{shortver}/include
 
 %changelog
+* Mon Oct 05 2020 Markus Neteler <neteler@mundialis.de> - 7.8.4-1
+- New upstream version GRASS GIS 7.8.4
+- disabled %{name}-config.h
+
+* Thu Aug 27 2020 Iñaki Úcar <iucar@fedoraproject.org> - 7.8.3-10
+- https://fedoraproject.org/wiki/Changes/FlexiBLAS_as_BLAS/LAPACK_manager
+
+* Sat Aug 01 2020 Fedora Release Engineering <releng@fedoraproject.org> - 7.8.3-9
+- Second attempt - Rebuilt for
+  https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+
+* Tue Jul 28 2020 Fedora Release Engineering <releng@fedoraproject.org> - 7.8.3-8
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_33_Mass_Rebuild
+
+* Fri Jun 26 2020 Markus Neteler <neteler@mundialis.de> - 7.8.3-7
+- added PDAL support
+
+* Sun Jun 21 2020 Markus Neteler <neteler@mundialis.de> - 7.8.3-6
+- disable automagic byte compilation (BZ#1847153)
+
+* Tue May 26 2020 Markus Neteler <neteler@mundialis.de> - 7.8.3-5
+- fixed wxPython for F33 (BZ#1836761)
+
+* Thu May 21 2020 Sandro Mani <manisandro@gmail.com> - 7.8.3-4
+- Rebuild (gdal)
+
+* Sat May 09 2020 Markus Neteler <neteler@mundialis.de> - 7.8.3-3
+- disabled mysql on EPEL8 due to header problem
+- updated PROJ package names for EPEL8
+
+* Wed May 06 2020 Markus Neteler <neteler@mundialis.de> - 7.8.3-2
+- enforce Python3 on EPEL7
+- do not hardcode python version on Fedora but use macro
+
+* Tue May 05 2020 Markus Neteler <neteler@mundialis.de> - 7.8.3
+- new upstream version GRASS GIS 7.8.3
+
+* Tue Mar 03 2020 Sandro Mani <manisandro@gmail.com> - 7.8.2-3
+- Rebuild (gdal)
+
+* Wed Jan 29 2020 Fedora Release Engineering <releng@fedoraproject.org> - 7.8.2-2
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_32_Mass_Rebuild
+
 * Thu Dec 12 2019 Markus Neteler <neteler@mundialis.de> - 7.8.2
 - new upstream version GRASS GIS 7.8.2
 

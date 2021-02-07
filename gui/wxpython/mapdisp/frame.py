@@ -23,7 +23,6 @@ This program is free software under the GNU General Public License
 """
 
 import os
-import sys
 import copy
 
 from core import globalvar
@@ -61,7 +60,7 @@ class MapFrame(SingleMapFrame):
     child double buffered drawing window.
     """
 
-    def __init__(self, parent, giface, title=_("GRASS GIS - Map display"),
+    def __init__(self, parent, giface, title=_("Map Display"),
                  toolbars=["map"], statusbar=True,
                  tree=None, notebook=None, lmgr=None,
                  page=None, Map=None, auimgr=None, name='MapWindow', **kwargs):
@@ -226,8 +225,7 @@ class MapFrame(SingleMapFrame):
 
         # create statusbar and its manager
         statusbar = self.CreateStatusBar(number=4, style=0)
-        if globalvar.wxPython3:
-            statusbar.SetMinHeight(24)
+        statusbar.SetMinHeight(24)
         statusbar.SetStatusWidths([-5, -2, -1, -1])
         self.statusbarManager = sb.SbManager(
             mapframe=self, statusbar=statusbar)
@@ -249,25 +247,6 @@ class MapFrame(SingleMapFrame):
 
     def GetMapWindow(self):
         return self.MapWindow
-
-    def SetTitleWithName(self, name):
-        """Set map display title its name
-
-        This function should be used when there are multiple map
-        displays.
-
-        Sets also other dynamically determined parts of the title
-        specific for GRASS GIS map display,
-        while the standard (inherited) ``SetTitle()`` function sets the
-        raw title and doesn't add or modify anything.
-        """
-        gisenv = grass.gisenv()
-        title = _("GRASS GIS Map Display: %(name)s - %(loc)s/%(mapset)s") % {
-            'name': name,
-            'loc': gisenv["LOCATION_NAME"],
-            'mapset': gisenv["MAPSET"]}
-
-        self.SetTitle(title)
 
     def _addToolbarVDigit(self):
         """Add vector digitizer toolbar
@@ -315,6 +294,7 @@ class MapFrame(SingleMapFrame):
                 MapWindow=self.MapWindow, digitClass=VDigit,
                 giface=self._giface)
             self.toolbars['vdigit'].quitDigitizer.connect(self.QuitVDigit)
+            self.Map.layerAdded.connect(self._updateVDigitLayers)
         self.MapWindowVDigit.SetToolbar(self.toolbars['vdigit'])
 
         self._mgr.AddPane(self.toolbars['vdigit'],
@@ -331,6 +311,11 @@ class MapFrame(SingleMapFrame):
         self.MapWindow.pen = wx.Pen(colour='red', width=2, style=wx.SOLID)
         self.MapWindow.polypen = wx.Pen(
             colour='green', width=2, style=wx.SOLID)
+
+    def _updateVDigitLayers(self, layer):
+        """Update vdigit layers"""
+        if 'vdigit' in self.toolbars:
+            self.toolbars['vdigit'].UpdateListOfLayers(updateTool=True)
 
     def AddNviz(self):
         """Add 3D view mode window
@@ -415,6 +400,7 @@ class MapFrame(SingleMapFrame):
             os.environ['GRASS_REGION'] = self.Map.SetRegion(
                 windres=True, windres3=True)
             self.MapWindow3D.GetDisplay().Init()
+            self.MapWindow3D.LoadDataLayers()
             del os.environ['GRASS_REGION']
 
             # switch from MapWindow to MapWindowGL
@@ -521,6 +507,11 @@ class MapFrame(SingleMapFrame):
         elif name == "vdigit":
             self.toolbars['map'].combo.SetValue(_("Vector digitizer"))
             self._addToolbarVDigit()
+
+        # raster digitizer
+        elif name == "rdigit":
+            self.toolbars['map'].combo.SetValue(_("Raster digitizer"))
+            self.AddRDigit()
 
         if fixed:
             self.toolbars['map'].combo.Disable()
@@ -677,7 +668,11 @@ class MapFrame(SingleMapFrame):
             return
         width, height = self.MapWindow.GetClientSize()
         for param in command[1:]:
-            p, val = param.split('=')
+            try:
+                p, val = param.split('=')
+            except ValueError:
+                # --overwrite
+                continue
             if p == 'format':  # must be there
                 if self.IsPaneShown('3d'):
                     extType = 'ppm'
@@ -1210,12 +1205,13 @@ class MapFrame(SingleMapFrame):
 
         :param overlayId: id of overlay
         """
-        dlg = self.decorations[overlayId].dialog
-        if dlg.IsShown():
-            dlg.SetFocus()
-            dlg.Raise()
-        else:
-            dlg.Show()
+        if overlayId in self.decorations:
+            dlg = self.decorations[overlayId].dialog
+            if dlg.IsShown():
+                dlg.SetFocus()
+                dlg.Raise()
+            else:
+                dlg.Show()
 
     def RemoveOverlay(self, overlayId):
         """Hide overlay.
@@ -1436,12 +1432,13 @@ class MapFrame(SingleMapFrame):
                       constrainRes=False, projection=False, alignExtent=True):
         """Set properies of map display window"""
         self.mapWindowProperties.autoRender = render
-        self.statusbarManager.SetMode(mode)
-        self.StatusbarUpdate()
+        if self.statusbarManager:
+            self.statusbarManager.SetMode(mode)
+            self.StatusbarUpdate()
+            self.SetProperty('projection', projection)
         self.mapWindowProperties.showRegion = showCompExtent
         self.mapWindowProperties.alignExtent = alignExtent
         self.mapWindowProperties.resolution = constrainRes
-        self.SetProperty('projection', projection)
 
     def IsStandalone(self):
         """Check if Map display is standalone
@@ -1571,15 +1568,20 @@ class MapFrame(SingleMapFrame):
     def QuitRDigit(self):
         """Calls digitizer cleanup, removes digitizer object and disconnects
         signals from Map."""
-        self.rdigit.CleanUp()
-        # disconnect updating layers
-        self.GetMap().layerAdded.disconnect(self._updateRDigitLayers)
-        self.GetMap().layerRemoved.disconnect(self._updateRDigitLayers)
-        self.GetMap().layerChanged.disconnect(self._updateRDigitLayers)
-        self._toolSwitcher.toggleToolChanged.disconnect(self.toolbars['rdigit'].CheckSelectedTool)
+        if not self.IsStandalone():
+            self.rdigit.CleanUp()
+            # disconnect updating layers
+            self.GetMap().layerAdded.disconnect(self._updateRDigitLayers)
+            self.GetMap().layerRemoved.disconnect(self._updateRDigitLayers)
+            self.GetMap().layerChanged.disconnect(self._updateRDigitLayers)
+            self._toolSwitcher.toggleToolChanged.disconnect(
+                self.toolbars['rdigit'].CheckSelectedTool,
+            )
 
-        self.RemoveToolbar('rdigit', destroy=True)
-        self.rdigit = None
+            self.RemoveToolbar('rdigit', destroy=True)
+            self.rdigit = None
+        else:
+            self.Close()
 
     def QuitVDigit(self):
         """Quit VDigit"""

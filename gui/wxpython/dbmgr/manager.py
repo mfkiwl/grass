@@ -22,7 +22,6 @@ This program is free software under the GNU General Public License
 @author Refactoring by Stepan Turek <stepan.turek seznam.cz> (GSoC 2012, mentor: Martin Landa)
 """
 
-import sys
 import os
 
 import wx
@@ -35,26 +34,25 @@ if globalvar.wxPythonPhoenix:
 else:
     import wx.lib.flatnotebook as FN
 
-import grass.script as grass
-
-
 from core.gcmd import GMessage
-from core.debug import Debug
 from dbmgr.base import DbMgrBase
 from gui_core.widgets import GNotebook
-from gui_core.wrap import Button
+from gui_core.wrap import Button, ClearButton, CloseButton
 
 
 class AttributeManager(wx.Frame, DbMgrBase):
 
     def __init__(self, parent, id=wx.ID_ANY,
-                 title=None, vectorName=None, item=None, log=None,
+                 title=None,
+                 base_title=None,
+                 vectorName=None, item=None, log=None,
                  selection=None, **kwargs):
         """GRASS Attribute Table Manager window
 
         :param parent: parent window
         :param id: window id
-        :param title: window title or None for default title
+        :param title: full window title or None for default title
+        :param base_title: the document independent part of title or None for default
         :param vectorName: name of vector map
         :param item: item from Layer Tree
         :param log: log window
@@ -76,11 +74,14 @@ class AttributeManager(wx.Frame, DbMgrBase):
 
         # title
         if not title:
-            title = "%s" % _("GRASS GIS Attribute Table Manager - ")
+            if not base_title:
+                base_title = _("Attribute Table Manager")
+            document = self.dbMgrData['vectName']
             if not self.dbMgrData['editable']:
-                title += _("READONLY - ")
-            title += "<%s>" % (self.dbMgrData['vectName'])
-
+                document = _("{document} (read-only)").format(document=document)
+            title = "{document} - {tool_name}".format(
+                document=document, tool_name=base_title
+            )
         self.SetTitle(title)
 
         # icon
@@ -136,14 +137,20 @@ class AttributeManager(wx.Frame, DbMgrBase):
             wx.CallAfter(self.notebook.SetSelection, 0)  # select browse tab
 
         # buttons
-        self.btnClose = Button(parent=self.panel, id=wx.ID_CLOSE)
+        self.btnClose = CloseButton(parent=self.panel)
         self.btnClose.SetToolTip(_("Close Attribute Table Manager"))
         self.btnReload = Button(parent=self.panel, id=wx.ID_REFRESH)
         self.btnReload.SetToolTip(
             _("Reload currently selected attribute data"))
-        self.btnReset = Button(parent=self.panel, id=wx.ID_CLEAR)
+        self.btnReset = ClearButton(parent=self.panel)
         self.btnReset.SetToolTip(
             _("Reload all attribute data (drop current selection)"))
+
+        # bind closing to ESC
+        self.Bind(wx.EVT_MENU, self.OnCloseWindow, id=wx.ID_CANCEL)
+        accelTableList = [(wx.ACCEL_NORMAL, wx.WXK_ESCAPE, wx.ID_CANCEL)]
+        accelTable = wx.AcceleratorTable(accelTableList)
+        self.SetAcceleratorTable(accelTable)
 
         # events
         self.btnClose.Bind(wx.EVT_BUTTON, self.OnCloseWindow)

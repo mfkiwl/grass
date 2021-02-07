@@ -39,7 +39,6 @@ try:
         FigureCanvasWxAgg as FigCanvas, \
         NavigationToolbar2WxAgg as NavigationToolbar
     import matplotlib.dates as mdates
-    from matplotlib import cbook
 except ImportError as e:
     raise ImportError(_('The Temporal Plot Tool needs the "matplotlib" '
                         '(python-matplotlib) package to be installed. {0}').format(e))
@@ -62,10 +61,11 @@ except ImportError:
 import wx.lib.filebrowsebutton as filebrowse
 
 from gui_core.widgets import GNotebook
-from gui_core.wrap import TextCtrl, Button, StaticText
+from gui_core.wrap import CheckBox, TextCtrl, Button, StaticText
 
 ALPHA = 0.5
 COLORS = ['b', 'g', 'r', 'c', 'm', 'y', 'k']
+LINEAR_REG_LINE_COLOR = (0.56, 0.00, 1.00)
 
 
 def check_version(*version):
@@ -95,9 +95,8 @@ def findBetween(s, first, last):
 class TplotFrame(wx.Frame):
     """The main frame of the application"""
 
-    def __init__(self, parent, giface):
-        wx.Frame.__init__(self, parent, id=wx.ID_ANY,
-                          title=_("GRASS GIS Temporal Plot Tool"))
+    def __init__(self, parent, giface, title=_("Temporal Plot Tool")):
+        wx.Frame.__init__(self, parent, id=wx.ID_ANY, title=title)
 
         tgis.init(True)
         self._giface = giface
@@ -172,7 +171,8 @@ class TplotFrame(wx.Frame):
         # self.vbox.AddSpacer(10)
 
         # ------------ADD NOTEBOOK------------
-        self.ntb = GNotebook(parent=self.mainPanel, style=FN.FNB_FANCY_TABS)
+        self.ntb = GNotebook(parent=self.mainPanel,
+                             style=FN.FNB_FANCY_TABS | FN.FNB_NODRAG)
 
         # ------------ITEMS IN NOTEBOOK PAGE (RASTER)------------------------
 
@@ -204,6 +204,11 @@ class TplotFrame(wx.Frame):
 
         self.coorval.SetToolTip(_("Coordinates can be obtained for example"
                                   " by right-clicking on Map Display."))
+        self.linRegRaster = CheckBox(
+            parent=self.controlPanelRaster, id=wx.ID_ANY,
+            label=_('Show simple linear regression line'),
+        )
+
         self.controlPanelSizerRaster = wx.BoxSizer(wx.VERTICAL)
         # self.controlPanelSizer.Add(wx.StaticText(self.panel, id=wx.ID_ANY,
         # label=_("Select space time raster dataset(s):")),
@@ -214,6 +219,7 @@ class TplotFrame(wx.Frame):
 
         self.controlPanelSizerRaster.Add(self.coor, flag=wx.EXPAND)
         self.controlPanelSizerRaster.Add(self.coorval, flag=wx.EXPAND)
+        self.controlPanelSizerRaster.Add(self.linRegRaster, flag=wx.EXPAND)
 
         self.controlPanelRaster.SetSizer(self.controlPanelSizerRaster)
         self.controlPanelSizerRaster.Fit(self)
@@ -253,6 +259,10 @@ class TplotFrame(wx.Frame):
         self.catsLabel = StaticText(parent=self.controlPanelVector,
                                     id=wx.ID_ANY,
                                     label=_('Select category of vector(s)'))
+        self.linRegVector = CheckBox(
+            parent=self.controlPanelVector, id=wx.ID_ANY,
+            label=_('Show simple linear regression line'),
+        )
 
         self.controlPanelSizerVector = wx.BoxSizer(wx.VERTICAL)
         # self.controlPanelSizer.Add(wx.StaticText(self.panel, id=wx.ID_ANY,
@@ -267,12 +277,13 @@ class TplotFrame(wx.Frame):
 
         self.controlPanelSizerVector.Add(self.catsLabel, flag=wx.EXPAND)
         self.controlPanelSizerVector.Add(self.cats, flag=wx.EXPAND)
+        self.controlPanelSizerVector.Add(self.linRegVector, flag=wx.EXPAND)
 
         self.controlPanelVector.SetSizer(self.controlPanelSizerVector)
         self.controlPanelSizerVector.Fit(self)
         self.ntb.AddPage(page=self.controlPanelVector, text=_('STVDS'),
                          name='STVDS')
-        
+
         # ------------ITEMS IN NOTEBOOK PAGE (LABELS)------------------------
         self.controlPanelLabels = wx.Panel(parent=self.ntb, id=wx.ID_ANY)
         self.titleLabel = StaticText(parent=self.controlPanelLabels,
@@ -651,14 +662,69 @@ class TplotFrame(wx.Frame):
             zipped = list(zip(x, *y))
         else:
             zipped = list(zip(x, y))
-        with open(self.csvpath, "wb") as fi:
+        with open(self.csvpath, "w", newline='') as fi:
             writer = csv.writer(fi)
             if self.header:
                 head = ["Time"]
                 head.extend(self.yticksNames)
                 writer.writerow(head)
             writer.writerows(zipped)
-        
+
+    def _calcSimpleLinReg(self, x, y, returnFormula=False):
+        """Calculate simple linear regression model
+        y = a + b*x (y is dependent variable, a is intercept, b is slope,
+        x is explanatory variable)
+
+        param numpy.array x: explanatory variable
+        param numpy.array y: dependent variable
+        param returnFormula bool: return calculated simple linear
+        regression formula too
+
+        return tuple or function:
+
+        tuple: (simple linear regression function model for dependent
+        variable, calculated simple linear regression formula model)
+
+        function: simple linear regression model function for dependent
+        variable
+        """
+        def predict(x1):
+            return a + b * x1
+        b = ((len(x) * np.sum(x*y) - np.sum(x) * np.sum(y)) /
+             (len(x) * np.sum(x*x) - np.sum(x) * np.sum(x)))
+        a = (np.sum(y) - b *np.sum(x)) / len(x)
+        if returnFormula:
+            return predict, "y = {a:.5f} + {b:.5f}*x".format(a=a, b=b)
+        return predict
+
+    def _drawSimpleLinRegLine(self, xdata, ydata):
+        """Draw simple regression line
+
+        :param list xdata: x axis data
+        :param list xdata: y axis data
+
+        return None
+        """
+        predict, regFormula = self._calcSimpleLinReg(
+            x=np.array(xdata), y=np.array(ydata),
+            returnFormula=True)
+
+        r2 = "r\u00B2 = {:.5f}".format(
+            np.corrcoef(np.array(xdata), np.array(ydata))[0, 1]**2)
+        self.plots.append(
+            self.axes2d.plot(
+                xdata,
+                predict(x1=np.array(xdata)),
+                color=LINEAR_REG_LINE_COLOR,
+                label="{reg}, {r2}".format(reg=regFormula, r2=r2))[0])
+
+        print(regFormula)
+        import platform
+        if platform.system() == 'Windows':
+            print(' ='.join(['r2'] + r2.split('=')[1:]))
+        else:
+            print(r2)
+
     def drawR(self):
         ycsv = []
         xcsv = []
@@ -688,6 +754,10 @@ class TplotFrame(wx.Frame):
             self.plots.append(self.axes2d.plot(xdata, ydata, marker='o',
                                                color=color,
                                                label=self.plotNameListR[i])[0])
+
+            if self.linRegRaster.IsChecked():
+                self._drawSimpleLinRegLine(xdata=xdata, ydata=ydata)
+
             if self.csvpath:
                 ycsv.append(ydata)
 
@@ -740,6 +810,10 @@ class TplotFrame(wx.Frame):
                     marker='o',
                     color=color,
                     label=labelname)[0])
+
+            if self.linRegVector.IsChecked():
+                self._drawSimpleLinRegLine(xdata=xdata, ydata=ydata)
+
             if self.csvpath:
                 ycsv.append(ydata)
 
@@ -780,6 +854,10 @@ class TplotFrame(wx.Frame):
 
             self.plots.append(self.axes2d.plot(xdata, ydata, marker='o',
                                                color=color, label=name)[0])
+
+            if self.linRegVector.IsChecked():
+                self._drawSimpleLinRegLine(xdata=xdata, ydata=ydata)
+
             if self.csvpath:
                 ycsv.append(ydata)
 
@@ -794,12 +872,13 @@ class TplotFrame(wx.Frame):
 
     def OnRedraw(self, event=None):
         """Required redrawing."""
+        self.init()
         self.csvpath = self.csvButton.GetValue()
         self.header = self.headerCheck.IsChecked()
         if (os.path.exists(self.csvpath) and not self.overwrite):
             dlg = wx.MessageDialog(self, _("{pa} already exists, do you want "
                                    "to overwrite?".format(pa=self.csvpath)),
-                                   _("File exists"), 
+                                   _("File exists"),
                                    wx.OK | wx.CANCEL | wx.ICON_QUESTION)
             if dlg.ShowModal() != wx.ID_OK:
                 dlg.Destroy()
@@ -807,7 +886,6 @@ class TplotFrame(wx.Frame):
                        message=_("Please change name of output CSV file or "))
                 return
             dlg.Destroy()
-        self.init()
         datasetsR = self.datasetSelectR.GetValue().strip()
         datasetsV = self.datasetSelectV.GetValue().strip()
 
@@ -830,8 +908,12 @@ class TplotFrame(wx.Frame):
                     coordx, coordy = self.coorval.GetValue().split(',')
                     coordx, coordy = float(coordx), float(coordy)
                 except (ValueError, AttributeError):
-                    GMessage(message=_("Incorrect coordinates format, should "
-                                       "be: x,y"), parent=self)
+                    GError(
+                        parent=self,
+                        message=_("Incorrect coordinates format, should be: x,y"),
+                        showTraceback=False,
+                    )
+                    return
             coors = [coordx, coordy]
             if coors:
                 try:
@@ -1124,7 +1206,7 @@ class DataCursor(object):
         self.formatFunction = formatFunction
         self.offsets = offsets
         self.display_all = display_all
-        if not cbook.iterable(artists):
+        if not np.iterable(artists):
             artists = [artists]
         self.artists = artists
         self.convert = convert
@@ -1135,7 +1217,7 @@ class DataCursor(object):
         for ax in self.axes:
             self.annotations[ax] = self.annotate(ax)
         for artist in self.artists:
-            artist.set_picker(tolerance)
+            artist.set_pickradius(tolerance)
         for fig in self.figures:
             fig.canvas.mpl_connect('pick_event', self)
             fig.canvas.mpl_connect('key_press_event', self.keyPressed)
